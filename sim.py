@@ -8,6 +8,7 @@ Muestra las tres fases en tiempo real:
 """
 
 import numpy as np
+import os
 import matplotlib
 try:
     matplotlib.use("TkAgg")
@@ -700,17 +701,25 @@ if __name__ == "__main__":
     print("  TE3002B · Computational Robotics Lab")
     print("=" * 55)
 
+    results_dir = "results"
+    os.makedirs(results_dir, exist_ok=True)
+
+    sim_output_path = os.path.join(results_dir, "sim_output.png")
+    metrics_path = os.path.join(results_dir, "metrics.png")
+    torque_report_path = os.path.join(results_dir, "torque_report.json")
+    torque_analysis_path = os.path.join(results_dir, "torque_analysis.png")
+
     sim = Sim2D(dt=0.05)
-    sim.run_and_save("sim_output.png", live_display=True)
+    sim.run_and_save(sim_output_path, live_display=True)
 
     # Generar métricas
-    plot_metrics(sim.anymal, sim.husky, "metrics.png")
+    plot_metrics(sim.anymal, sim.husky, metrics_path)
     
     # Generar reporte de control de fuerza para rúbrica
     print("\n[Sim2D] Generando reporte de control de fuerza...")
     torque_logger.print_summary()
-    torque_logger.generate_torque_report("torque_report.json")
-    torque_logger.plot_torque_analysis("torque_analysis.png")
+    torque_logger.generate_torque_report(torque_report_path)
+    torque_logger.plot_torque_analysis(torque_analysis_path)
 
     print("\n✓ Simulación completada con todas las mejoras implementadas:")
     print("  ✓ Animación fluida (máquina de estados no bloqueante)")
@@ -718,7 +727,7 @@ if __name__ == "__main__":
     print("  ✓ Sincronización por eventos (C→B→A)")
     print("  ✓ Log de torques para rúbrica")
     print("\nArchivos generados:")
-    print("  - sim_output.png (visualización completa)")
-    print("  - metrics.png (métricas del sistema)")
-    print("  - torque_report.json (log de torques)")
-    print("  - torque_analysis.png (análisis de control de fuerza)")
+    print(f"  - {sim_output_path} (visualización completa)")
+    print(f"  - {metrics_path} (métricas del sistema)")
+    print(f"  - {torque_report_path} (log de torques)")
+    print(f"  - {torque_analysis_path} (análisis de control de fuerza)")
