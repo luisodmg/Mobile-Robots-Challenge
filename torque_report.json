@@ -1,0 +1,147 @@
+{
+  "summary": {
+    "total_operations": 3,
+    "total_events": 3,
+    "robots_involved": [
+      "PuzzleBot_arm"
+    ]
+  },
+  "torque_statistics": {
+    "mean_torque_magnitude": 0.13958894004138653,
+    "max_torque_magnitude": 0.1697056274847714,
+    "min_torque_magnitude": 0.12323904783807417,
+    "std_torque_magnitude": 0.02132180799717004,
+    "joint_torque_means": [
+      0.0,
+      -0.12000000000000001,
+      -0.04325415615252315
+    ],
+    "joint_torque_stds": [
+      0.0,
+      3.303574279200384e-17,
+      0.06057036943654157
+    ],
+    "singularities_detected": 3
+  },
+  "force_control_events": [
+    {
+      "robot_id": "PuzzleBot_arm",
+      "event_type": "contact_force_control",
+      "box_name": "target",
+      "timestamp": 0,
+      "details": {
+        "method": "jacobian_transposed",
+        "formula": "\u03c4 = J^T * f",
+        "contact_force": [
+          0.0,
+          0.0,
+          -1.5
+        ],
+        "resulting_torques": [
+          0.0,
+          -0.11999999999999998,
+          0.02806889581075713
+        ]
+      }
+    },
+    {
+      "robot_id": "PuzzleBot_arm",
+      "event_type": "contact_force_control",
+      "box_name": "target",
+      "timestamp": 1,
+      "details": {
+        "method": "jacobian_transposed",
+        "formula": "\u03c4 = J^T * f",
+        "contact_force": [
+          0.0,
+          0.0,
+          -1.5
+        ],
+        "resulting_torques": [
+          0.0,
+          -0.12000000000000005,
+          -0.037831364268326576
+        ]
+      }
+    },
+    {
+      "robot_id": "PuzzleBot_arm",
+      "event_type": "contact_force_control",
+      "box_name": "target",
+      "timestamp": 2,
+      "details": {
+        "method": "jacobian_transposed",
+        "formula": "\u03c4 = J^T * f",
+        "contact_force": [
+          0.0,
+          0.0,
+          -1.5
+        ],
+        "resulting_torques": [
+          0.0,
+          -0.11999999999999998,
+          -0.12
+        ]
+      }
+    }
+  ],
+  "detailed_torque_log": [
+    {
+      "robot_id": "PuzzleBot_arm",
+      "operation": "place_box_contact",
+      "timestamp": 0.0,
+      "torques": [
+        0.0,
+        -0.11999999999999998,
+        0.02806889581075713
+      ],
+      "torque_magnitude": 0.12323904783807417,
+      "force_applied": [
+        0.0,
+        0.0,
+        -1.5
+      ],
+      "det_J": 0.0006736052256329368,
+      "max_torque": 0.11999999999999998,
+      "min_torque": 0.0
+    },
+    {
+      "robot_id": "PuzzleBot_arm",
+      "operation": "place_box_contact",
+      "timestamp": 0.0,
+      "torques": [
+        0.0,
+        -0.12000000000000005,
+        -0.037831364268326576
+      ],
+      "torque_magnitude": 0.125822144801314,
+      "force_applied": [
+        0.0,
+        0.0,
+        -1.5
+      ],
+      "det_J": 0.0006394872946353199,
+      "max_torque": 0.12000000000000005,
+      "min_torque": 0.0
+    },
+    {
+      "robot_id": "PuzzleBot_arm",
+      "operation": "place_box_contact",
+      "timestamp": 0.0,
+      "torques": [
+        0.0,
+        -0.11999999999999998,
+        -0.12
+      ],
+      "torque_magnitude": 0.1697056274847714,
+      "force_applied": [
+        0.0,
+        0.0,
+        -1.5
+      ],
+      "det_J": 0.0007679999999999998,
+      "max_torque": 0.12,
+      "min_torque": 0.0
+    }
+  ]
+}
