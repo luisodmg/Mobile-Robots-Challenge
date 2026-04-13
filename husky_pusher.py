@@ -6,6 +6,7 @@ Sensor: LiDAR 2D simulado.
 """
 
 import numpy as np
+import time
 from typing import List, Tuple, Dict
 
 
@@ -179,12 +180,11 @@ class HuskyPusher:
         self.phase_log: List[str] = []
         self.time = 0.0
         
-        # State machine for non-blocking operation
+        # Máquina de estados no bloqueante
         self.nav_state = "IDLE"
         self.target_box = None
         self.target_pos = None
         self.pushing = False
-        self.returning = False
 
     def detect_boxes(self) -> List[Dict]:
         ranges = self.lidar.scan(self.state, self.boxes)
@@ -203,7 +203,7 @@ class HuskyPusher:
         tol_pos: float = 0.15, max_steps: int = 500,
         pushing: bool = False, current_box: Box = None
     ) -> bool:
-        """Navega al punto (x_goal, y_goal) permitiendo rotación en el lugar."""
+        """Navega de forma bloqueante (con sincronización de tiempo real para animación)."""
         for _ in range(max_steps):
             dx = x_goal - self.state.x
             dy = y_goal - self.state.y
@@ -215,21 +215,22 @@ class HuskyPusher:
             angle_to_goal = np.arctan2(dy, dx)
             angle_err = self._wrap_angle(angle_to_goal - self.state.theta)
 
-            # Acoplamiento de velocidad: solo avanza si está mirando hacia la meta
-            if abs(angle_err) < 0.5: # Aprox 28 grados
+            if abs(angle_err) < 0.5:
                 v_des = min(0.8 * dist, HUSKY_MAX_V)
             else:
-                v_des = 0.0 # Rota en su propio eje primero
+                v_des = 0.0
 
             w_des = 2.5 * angle_err
 
             v_cmd, w_cmd = self.controller.compute(self.state, v_des, w_des, self.dt)
             self._integrate(v_cmd, w_cmd)
             self.time += self.dt
+            
+            # ¡IMPORTANTE!: Pequeña pausa para que la animación en el Main Thread alcance a renderizar
+            time.sleep(self.dt * 0.5) 
 
-            # Si estamos empujando, actualizar la posición de la caja empíricamente
             if pushing and current_box is not None:
-                contact_distance = 0.4 # Distancia desde el centro del robot al centro de la caja
+                contact_distance = 0.4
                 current_box.x = self.state.x + contact_distance * np.cos(self.state.theta)
                 current_box.y = self.state.y + contact_distance * np.sin(self.state.theta)
 
@@ -245,56 +246,61 @@ class HuskyPusher:
     def _wrap_angle(a: float) -> float:
         return (a + np.pi) % (2 * np.pi) - np.pi
 
+    # ------------------------------------------------------------------
+    # Lógica No Bloqueante (Optimizado: Puntos Intermedios de Evasión)
+    # ------------------------------------------------------------------
+
     def push_box_nonblocking(self, box: Box) -> bool:
-        """Non-blocking version of push_box for smooth animation."""
+        """Versión no bloqueante que usa un PRE_POSITIONING para esquivar colisiones."""
         if self.nav_state == "IDLE":
-            print(f"\n[HuskyPusher] Iniciando empuje de caja {box.id}")
+            print(f"\n[HuskyPusher] Iniciando aproximación a caja {box.id}")
             self.target_box = box
-            self.nav_state = "POSITIONING"
             
-            # Determine push direction
             push_dir_y = 1.0 if box.y >= 0 else -1.0
             push_target_y = push_dir_y * (self.CORRIDOR_Y_MAX + box.height + 0.3)
-            
-            # Set positioning target
             offset = 0.6
+            
+            # Punto intermedio: 0.8 metros antes de la caja en el eje X para no chocar
             self.target_pos = {
+                "pre_behind": np.array([box.x - 0.8, box.y - (push_dir_y * offset)]),
                 "behind": np.array([box.x, box.y - (push_dir_y * offset)]),
-                "push": np.array([box.x, push_target_y]),
-                "home": np.array([0.5, 0.0])
+                "push": np.array([box.x, push_target_y])
             }
+            
+            # Iniciar navegando hacia el punto seguro intermedio
+            self.nav_state = "PRE_POSITIONING"
+            return False
+
+        elif self.nav_state == "PRE_POSITIONING":
+            target = self.target_pos["pre_behind"]
+            if self._step_goto(target[0], target[1], tol_pos=0.15):
+                print(f"[HuskyPusher] En punto seguro. Alineándose con {self.target_box.id}")
+                self.nav_state = "POSITIONING"
             return False
             
         elif self.nav_state == "POSITIONING":
-            # Move to behind position
             target = self.target_pos["behind"]
             if self._step_goto(target[0], target[1], tol_pos=0.1):
+                print(f"[HuskyPusher] Posicionado. Empujando...")
                 self.nav_state = "PUSHING"
                 self.pushing = True
             return False
             
         elif self.nav_state == "PUSHING":
-            # Push the box
             target = self.target_pos["push"]
             if self._step_goto(target[0], target[1], tol_pos=0.2, pushing=True):
-                self.nav_state = "RETURNING"
                 self.pushing = False
                 
-                # Check if box is cleared
                 out = (self.target_box.y < self.CORRIDOR_Y_MIN - self.target_box.height / 2
                        or self.target_box.y > self.CORRIDOR_Y_MAX + self.target_box.height / 2)
                 self.target_box.cleared = out
                 
                 if out:
-                    print(f"[HuskyPusher] ✓ Caja {self.target_box.id} fuera del corredor")
+                    print(f"[HuskyPusher] ✓ Caja {self.target_box.id} despejada")
                 else:
-                    print(f"[HuskyPusher] ✗ Caja {self.target_box.id} sigue en el corredor")
-            return False
-            
-        elif self.nav_state == "RETURNING":
-            # Return to home position
-            target = self.target_pos["home"]
-            if self._step_goto(target[0], target[1], tol_pos=0.15):
+                    print(f"[HuskyPusher] ✗ Caja {self.target_box.id} sigue en corredor")
+                
+                # Pasa directo a IDLE para enganchar la siguiente caja
                 self.nav_state = "IDLE"
                 self.target_box = None
                 self.target_pos = None
@@ -305,7 +311,7 @@ class HuskyPusher:
     
     def _step_goto(self, x_goal: float, y_goal: float, tol_pos: float = 0.15, 
                    pushing: bool = False) -> bool:
-        """Single step of goto for non-blocking operation."""
+        """Paso único de navegación para animaciones no bloqueantes."""
         dx = x_goal - self.state.x
         dy = y_goal - self.state.y
         dist = np.hypot(dx, dy)
@@ -316,7 +322,6 @@ class HuskyPusher:
         angle_to_goal = np.arctan2(dy, dx)
         angle_err = self._wrap_angle(angle_to_goal - self.state.theta)
 
-        # Velocity coupling
         if abs(angle_err) < 0.5:
             v_des = min(0.8 * dist, HUSKY_MAX_V)
         else:
@@ -328,7 +333,6 @@ class HuskyPusher:
         self._integrate(v_cmd, w_cmd)
         self.time += self.dt
 
-        # Update box position if pushing
         if pushing and self.target_box is not None:
             contact_distance = 0.4
             self.target_box.x = self.state.x + contact_distance * np.cos(self.state.theta)
@@ -337,33 +341,80 @@ class HuskyPusher:
         return False
 
     def clear_corridor_step(self) -> bool:
-        """Single step of corridor clearing for non-blocking animation."""
-        # Find next uncleared box
+        """Iteración global de la máquina de estados."""
         if self.nav_state == "IDLE":
             for box in self.boxes:
                 if not box.cleared:
                     self.push_box_nonblocking(box)
-                    break
-            else:
-                # All boxes cleared, return to start
-                if not self.returning:
-                    self.nav_state = "RETURNING"
-                    self.target_pos = {"home": np.array([0.5, 0.0])}
-                    self.returning = True
-                else:
-                    if self._step_goto(0.5, 0.0, tol_pos=0.15):
-                        self.returning = False
-                        corridor_clear = all(box.cleared for box in self.boxes)
-                        print(f"\n[HuskyPusher] Corredor {'✓ DESPEJADO' if corridor_clear else '✗ NO despejado'}")
-                        return True
+                    return False
+            
+            # Si terminamos el ciclo y no hay cajas, activamos el retorno global
+            self.nav_state = "RETURNING_HOME"
+            self.target_pos = {"home": np.array([0.5, 0.0])}
+            return False
+            
+        elif self.nav_state == "RETURNING_HOME":
+            target = self.target_pos["home"]
+            if self._step_goto(target[0], target[1], tol_pos=0.15):
+                self.nav_state = "DONE"
+                corridor_clear = all(box.cleared for box in self.boxes)
+                print(f"\n[HuskyPusher] Corredor {'✓ DESPEJADO' if corridor_clear else '✗ NO despejado'}")
+                return True
+            return False
+            
+        elif self.nav_state == "DONE":
+            return True
+            
         else:
-            # Continue current operation
+            # Sigue con la operación actual (PRE_POSITIONING, POSITIONING o PUSHING)
             self.push_box_nonblocking(self.target_box)
             
         return False
         
+    # ------------------------------------------------------------------
+    # Ejecución Bloqueante (Usada por el Coordinator heredado)
+    # ------------------------------------------------------------------
+    
+    def push_box(self, box: Box) -> bool:
+        """Versión bloqueante con puntos intermedios."""
+        print(f"\n[HuskyPusher] Aproximación segura a caja {box.id}")
+
+        push_dir_y = 1.0 if box.y >= 0 else -1.0
+        push_target_y = push_dir_y * (self.CORRIDOR_Y_MAX + box.height + 0.3)
+
+        offset = 0.6
+        behind_y = box.y - (push_dir_y * offset)
+        
+        # 1. Punto intermedio
+        pre_behind_x = box.x - 0.8
+        ok = self.goto(pre_behind_x, behind_y, tol_pos=0.15)
+        if not ok: return False
+            
+        # 2. Detrás de la caja
+        behind_x = box.x
+        ok = self.goto(behind_x, behind_y, tol_pos=0.1)
+        if not ok:
+            print(f"[HuskyPusher] No pude posicionarme detrás de {box.id}")
+            return False
+
+        # 3. Empujar
+        push_x = box.x
+        push_y = push_target_y
+        ok = self.goto(push_x, push_y, tol_pos=0.2, pushing=True, current_box=box)
+
+        out = (box.y < self.CORRIDOR_Y_MIN - box.height / 2
+               or box.y > self.CORRIDOR_Y_MAX + box.height / 2)
+        box.cleared = out
+
+        if out:
+            print(f"[HuskyPusher] ✓ Caja {box.id} fuera del corredor → ({box.x:.2f}, {box.y:.2f})")
+        else:
+            print(f"[HuskyPusher] ✗ Caja {box.id} sigue en el corredor")
+
+        return out
+
     def clear_corridor(self) -> bool:
-        """Legacy blocking version for compatibility."""
+        """Limpia todo secuencialmente y regresa a la base al final."""
         print("\n" + "=" * 50)
         print("  FASE 1: Despeje del corredor — Husky A200")
         print("=" * 50)
@@ -377,7 +428,7 @@ class HuskyPusher:
             if not success:
                 all_clear = False
 
-        # Volver a zona de inicio
+        # Volver a zona de inicio UNA SOLA VEZ al final
         self.goto(0.5, 0.0)
 
         print("\n[HuskyPusher] Reporte final:")
