@@ -1,4 +1,4 @@
-# MiniRetoSemana2 - Almacen Robotico Autonomo (TE3002B)
+# Almacen Robotico Autonomo
 
 Simulacion 2D de un sistema multi-robot para un almacen autonomo, desarrollada en Python con enfoque en coordinacion por fases, cinematica, control de fuerza y visualizacion de metricas.
 
