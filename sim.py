@@ -508,8 +508,10 @@ class Sim2D:
         print(f"[Sim2D] Imagen guardada en {output_path}")
 
         if live_display:
+            # Mantener la ventana 3 segundos al finalizar y cerrar automáticamente.
             plt.ioff()
-            plt.show()
+            plt.pause(3.0)
+            plt.close(self.fig)
 
     def _render_composite(self, frames_data: List, output_path: str):
         """Renderiza una imagen compuesta con los momentos clave de la simulación."""
