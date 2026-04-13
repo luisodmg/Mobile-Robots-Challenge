@@ -28,6 +28,7 @@ Implementar y demostrar un pipeline completo de manipulacion y logistica robotic
 - Sensor LiDAR 2D simulado para deteccion de obstaculos.
 - Estrategia de empuje de cajas hacia fuera del corredor.
 - Implementacion bloqueante y no bloqueante (maquina de estados para animacion fluida).
+- Secuencia continua de cajas sin regresar a la posicion de inicio entre empujes.
 
 ### 2.2 Fase 2 - ANYmal transporta PuzzleBots
 
@@ -75,10 +76,10 @@ Implementar y demostrar un pipeline completo de manipulacion y logistica robotic
 
 Archivos de salida generados en ejecucion:
 
-- sim_output.png
-- metrics.png
-- torque_report.json
-- torque_analysis.png
+- results/sim_output.png
+- results/metrics.png
+- results/torque_report.json
+- results/torque_analysis.png
 
 ## 4. Requisitos
 
@@ -124,10 +125,12 @@ python sim.py
 
 Esto ejecuta las tres fases, actualiza la animacion en vivo y genera:
 
-- sim_output.png: composicion con frames clave.
-- metrics.png: resumen grafico de trayectoria y controles.
-- torque_report.json: log estructurado de eventos y torques.
-- torque_analysis.png: analisis visual del comportamiento de torque.
+- results/sim_output.png: composicion con frames clave.
+- results/metrics.png: resumen grafico de trayectoria y controles.
+- results/torque_report.json: log estructurado de eventos y torques.
+- results/torque_analysis.png: analisis visual del comportamiento de torque.
+
+Al finalizar, la ventana de simulacion permanece abierta 3 segundos y se cierra automaticamente.
 
 ### 6.2 Ejecucion del coordinador (flujo por estados)
 
