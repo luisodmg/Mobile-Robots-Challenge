@@ -126,11 +126,9 @@ class SkidSteerController:
         v_cmd = np.clip(v_des, -HUSKY_MAX_V, HUSKY_MAX_V)
         w_cmd = np.clip(w_des, -HUSKY_MAX_W, HUSKY_MAX_W)
 
-        # Velocidades medidas (con deslizamiento)
         v_meas = v_cmd * (1 - self.slip) + np.random.normal(0, 0.005)
         w_meas = w_cmd * (1 - self.slip * 0.5) + np.random.normal(0, 0.005)
 
-        # Compensación feedforward
         v_comp = v_cmd / (1 - self.slip + 1e-9)
         w_comp = w_cmd / (1 - self.slip * 0.5 + 1e-9)
         v_comp = np.clip(v_comp, -HUSKY_MAX_V, HUSKY_MAX_V)
@@ -180,7 +178,6 @@ class HuskyPusher:
         self.phase_log: List[str] = []
         self.time = 0.0
         
-        # Máquina de estados no bloqueante
         self.nav_state = "IDLE"
         self.target_box = None
         self.target_pos = None
@@ -226,13 +223,17 @@ class HuskyPusher:
             self._integrate(v_cmd, w_cmd)
             self.time += self.dt
             
-            # ¡IMPORTANTE!: Pequeña pausa para que la animación en el Main Thread alcance a renderizar
             time.sleep(self.dt * 0.5) 
 
+            # LÓGICA CORREGIDA: FÍSICA DE CONTACTO REAL
             if pushing and current_box is not None:
-                contact_distance = 0.4
-                current_box.x = self.state.x + contact_distance * np.cos(self.state.theta)
-                current_box.y = self.state.y + contact_distance * np.sin(self.state.theta)
+                contact_distance = 0.5 # Aumentado para mejor colisión visual
+                dist_to_box = np.hypot(current_box.x - self.state.x, current_box.y - self.state.y)
+                
+                # Solo mueve la caja si el Husky ya llegó a tocarla físicamente
+                if dist_to_box <= contact_distance + 0.05:
+                    current_box.x = self.state.x + contact_distance * np.cos(self.state.theta)
+                    current_box.y = self.state.y + contact_distance * np.sin(self.state.theta)
 
         return False
 
@@ -247,7 +248,7 @@ class HuskyPusher:
         return (a + np.pi) % (2 * np.pi) - np.pi
 
     # ------------------------------------------------------------------
-    # Lógica No Bloqueante (Optimizado: Puntos Intermedios de Evasión)
+    # Lógica No Bloqueante
     # ------------------------------------------------------------------
 
     def push_box_nonblocking(self, box: Box) -> bool:
@@ -258,16 +259,16 @@ class HuskyPusher:
             
             push_dir_y = 1.0 if box.y >= 0 else -1.0
             push_target_y = push_dir_y * (self.CORRIDOR_Y_MAX + box.height + 0.3)
-            offset = 0.6
             
-            # Punto intermedio: 0.8 metros antes de la caja en el eje X para no chocar
+            # Offset de preparación ampliado para dar espacio de aproximación
+            offset = 0.7 
+            
             self.target_pos = {
                 "pre_behind": np.array([box.x - 0.8, box.y - (push_dir_y * offset)]),
                 "behind": np.array([box.x, box.y - (push_dir_y * offset)]),
                 "push": np.array([box.x, push_target_y])
             }
             
-            # Iniciar navegando hacia el punto seguro intermedio
             self.nav_state = "PRE_POSITIONING"
             return False
 
@@ -300,7 +301,6 @@ class HuskyPusher:
                 else:
                     print(f"[HuskyPusher] ✗ Caja {self.target_box.id} sigue en corredor")
                 
-                # Pasa directo a IDLE para enganchar la siguiente caja
                 self.nav_state = "IDLE"
                 self.target_box = None
                 self.target_pos = None
@@ -333,10 +333,15 @@ class HuskyPusher:
         self._integrate(v_cmd, w_cmd)
         self.time += self.dt
 
+        # LÓGICA CORREGIDA: FÍSICA DE CONTACTO REAL
         if pushing and self.target_box is not None:
-            contact_distance = 0.4
-            self.target_box.x = self.state.x + contact_distance * np.cos(self.state.theta)
-            self.target_box.y = self.state.y + contact_distance * np.sin(self.state.theta)
+            contact_distance = 0.5 # Aumentado para mejor colisión visual
+            dist_to_box = np.hypot(self.target_box.x - self.state.x, self.target_box.y - self.state.y)
+            
+            # Solo mueve la caja si el Husky ya llegó a tocarla físicamente
+            if dist_to_box <= contact_distance + 0.05:
+                self.target_box.x = self.state.x + contact_distance * np.cos(self.state.theta)
+                self.target_box.y = self.state.y + contact_distance * np.sin(self.state.theta)
 
         return False
 
@@ -348,7 +353,6 @@ class HuskyPusher:
                     self.push_box_nonblocking(box)
                     return False
             
-            # Si terminamos el ciclo y no hay cajas, activamos el retorno global
             self.nav_state = "RETURNING_HOME"
             self.target_pos = {"home": np.array([0.5, 0.0])}
             return False
@@ -366,7 +370,6 @@ class HuskyPusher:
             return True
             
         else:
-            # Sigue con la operación actual (PRE_POSITIONING, POSITIONING o PUSHING)
             self.push_box_nonblocking(self.target_box)
             
         return False
@@ -382,22 +385,19 @@ class HuskyPusher:
         push_dir_y = 1.0 if box.y >= 0 else -1.0
         push_target_y = push_dir_y * (self.CORRIDOR_Y_MAX + box.height + 0.3)
 
-        offset = 0.6
+        offset = 0.7 
         behind_y = box.y - (push_dir_y * offset)
         
-        # 1. Punto intermedio
         pre_behind_x = box.x - 0.8
         ok = self.goto(pre_behind_x, behind_y, tol_pos=0.15)
         if not ok: return False
             
-        # 2. Detrás de la caja
         behind_x = box.x
         ok = self.goto(behind_x, behind_y, tol_pos=0.1)
         if not ok:
             print(f"[HuskyPusher] No pude posicionarme detrás de {box.id}")
             return False
 
-        # 3. Empujar
         push_x = box.x
         push_y = push_target_y
         ok = self.goto(push_x, push_y, tol_pos=0.2, pushing=True, current_box=box)
@@ -414,7 +414,6 @@ class HuskyPusher:
         return out
 
     def clear_corridor(self) -> bool:
-        """Limpia todo secuencialmente y regresa a la base al final."""
         print("\n" + "=" * 50)
         print("  FASE 1: Despeje del corredor — Husky A200")
         print("=" * 50)
@@ -428,7 +427,6 @@ class HuskyPusher:
             if not success:
                 all_clear = False
 
-        # Volver a zona de inicio UNA SOLA VEZ al final
         self.goto(0.5, 0.0)
 
         print("\n[HuskyPusher] Reporte final:")
