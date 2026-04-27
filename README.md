@@ -61,7 +61,7 @@ de los robots sin reemplazar la logica clasica de control. La idea no es que el 
 "mande" por completo, sino que actue como un asesor numerico encima de las reglas ya
 existentes.
 
-En la implementacion actual se usa una politica compartida en [robot_ml_policy.py](robot_ml_policy.py), basada en modelos logisticos sencillos entrenados con datos sinteticos generados a partir del comportamiento esperado del propio sistema. Esa politica entrega tres tipos de recomendaciones:
+En la implementacion actual se usa una politica compartida en [robot_ml_policy.py](robot_ml_policy.py), basada en modelos de random forest entrenados con datos sinteticos generados a partir del comportamiento esperado del propio sistema. Esa politica entrega tres tipos de recomendaciones:
 
 - Husky: escala la velocidad y el giro segun distancia al objetivo, error angular, distancia al obstaculo mas cercano y si el robot esta empujando una caja.
 - ANYmal: ajusta la agresividad de la marcha segun distancia al destino, payload y el valor minimo de det(J) observado en las patas.
@@ -93,7 +93,7 @@ En otras palabras, el ML aqui cumple el papel de capa adaptativa: aprende patron
   - Modelo Husky, LiDAR y estrategia de despeje.
 - robot_ml_policy.py
   - Politica ML compartida para ajustar decisiones de Husky, ANYmal y PuzzleBot.
-  - Capa adaptativa ligera basada en modelos logisticos.
+  - Capa adaptativa ligera basada en random forest.
 - puzzlebot_arm.py
   - FK, IK, Jacobiano, fuerza->torque y pick/place.
 - sim.py

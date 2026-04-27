@@ -1,7 +1,7 @@
 """
-robot_ml_policy.py - Lightweight logistic-regression policy for robot adaptation.
+robot_ml_policy.py - Lightweight random-forest policy for robot adaptation.
 
-The policy learns three small classifiers from synthetic examples generated from the
+The policy learns three binary classifiers from synthetic examples generated from the
 existing rule-based behavior:
 - Husky navigation safety
 - ANYmal gait speed safety
@@ -19,65 +19,209 @@ from typing import Tuple
 import numpy as np
 
 
-def _sigmoid(z: np.ndarray) -> np.ndarray:
-    z = np.clip(z, -40.0, 40.0)
-    return 1.0 / (1.0 + np.exp(-z))
+@dataclass
+class _TreeNode:
+    """Node for a binary classification tree."""
+
+    prob: float
+    feature_idx: int = -1
+    threshold: float = 0.0
+    left: "_TreeNode | None" = None
+    right: "_TreeNode | None" = None
+
+    @property
+    def is_leaf(self) -> bool:
+        return self.left is None or self.right is None
 
 
 @dataclass
-class LogisticModel:
-    """Small logistic-regression model trained with gradient descent."""
+class _SimpleDecisionTree:
+    """Small CART-like tree for binary classification with Gini splitting."""
 
-    weights: np.ndarray
-    bias: float
-    mean: np.ndarray
-    scale: np.ndarray
+    max_depth: int
+    min_samples_split: int
+    max_features: int
+    root: _TreeNode | None = None
 
     @classmethod
     def fit(
         cls,
         X: np.ndarray,
         y: np.ndarray,
-        lr: float = 0.15,
-        steps: int = 1800,
-        l2: float = 0.01,
-    ) -> "LogisticModel":
+        rng: np.random.Generator,
+        max_depth: int = 5,
+        min_samples_split: int = 12,
+        max_features: int | None = None,
+    ) -> "_SimpleDecisionTree":
         X = np.asarray(X, dtype=float)
         y = np.asarray(y, dtype=float).reshape(-1)
+        if max_features is None:
+            max_features = max(1, int(np.sqrt(X.shape[1])))
 
-        mean = X.mean(axis=0)
-        scale = X.std(axis=0)
-        scale = np.where(scale < 1e-9, 1.0, scale)
-        Xn = (X - mean) / scale
+        model = cls(
+            max_depth=max_depth,
+            min_samples_split=min_samples_split,
+            max_features=max_features,
+        )
+        idx = np.arange(X.shape[0])
+        model.root = model._build(X, y, idx, depth=0, rng=rng)
+        return model
 
-        weights = np.zeros(X.shape[1], dtype=float)
-        bias = 0.0
+    def _gini(self, y: np.ndarray) -> float:
+        if y.size == 0:
+            return 0.0
+        p = float(np.mean(y))
+        return 1.0 - p * p - (1.0 - p) * (1.0 - p)
 
-        n = Xn.shape[0]
-        for _ in range(steps):
-            logits = Xn @ weights + bias
-            pred = _sigmoid(logits)
-            error = pred - y
-            grad_w = (Xn.T @ error) / n + l2 * weights
-            grad_b = float(error.mean())
-            weights -= lr * grad_w
-            bias -= lr * grad_b
+    def _best_split(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        idx: np.ndarray,
+        rng: np.random.Generator,
+    ) -> tuple[int, float] | tuple[None, None]:
+        n_features = X.shape[1]
+        feat_pool = rng.choice(n_features, size=min(self.max_features, n_features), replace=False)
 
-        return cls(weights=weights, bias=bias, mean=mean, scale=scale)
+        best_feat = None
+        best_thr = None
+        best_cost = np.inf
+
+        for feat in feat_pool:
+            vals = X[idx, feat]
+            uniq = np.unique(vals)
+            if uniq.size < 2:
+                continue
+
+            if uniq.size > 20:
+                q = np.linspace(0.05, 0.95, 15)
+                thresholds = np.quantile(vals, q)
+            else:
+                thresholds = (uniq[:-1] + uniq[1:]) * 0.5
+
+            for thr in thresholds:
+                left_idx = idx[X[idx, feat] <= thr]
+                right_idx = idx[X[idx, feat] > thr]
+                if left_idx.size == 0 or right_idx.size == 0:
+                    continue
+
+                g_left = self._gini(y[left_idx])
+                g_right = self._gini(y[right_idx])
+                cost = (left_idx.size * g_left + right_idx.size * g_right) / idx.size
+
+                if cost < best_cost:
+                    best_cost = cost
+                    best_feat = int(feat)
+                    best_thr = float(thr)
+
+        return best_feat, best_thr
+
+    def _build(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        idx: np.ndarray,
+        depth: int,
+        rng: np.random.Generator,
+    ) -> _TreeNode:
+        prob = float(np.mean(y[idx])) if idx.size > 0 else 0.5
+        node = _TreeNode(prob=prob)
+
+        if (
+            depth >= self.max_depth
+            or idx.size < self.min_samples_split
+            or prob <= 1e-6
+            or prob >= 1.0 - 1e-6
+        ):
+            return node
+
+        feat, thr = self._best_split(X, y, idx, rng)
+        if feat is None:
+            return node
+
+        left_idx = idx[X[idx, feat] <= thr]
+        right_idx = idx[X[idx, feat] > thr]
+        if left_idx.size == 0 or right_idx.size == 0:
+            return node
+
+        node.feature_idx = feat
+        node.threshold = thr
+        node.left = self._build(X, y, left_idx, depth + 1, rng)
+        node.right = self._build(X, y, right_idx, depth + 1, rng)
+        return node
 
     def predict_proba(self, x: np.ndarray) -> float:
         x = np.asarray(x, dtype=float).reshape(-1)
-        xn = (x - self.mean) / self.scale
-        return float(_sigmoid(xn @ self.weights + self.bias))
+        node = self.root
+        if node is None:
+            return 0.5
+
+        while not node.is_leaf:
+            if x[node.feature_idx] <= node.threshold:
+                node = node.left if node.left is not None else node
+            else:
+                node = node.right if node.right is not None else node
+            if node.left is None or node.right is None:
+                break
+
+        return float(node.prob)
+
+
+@dataclass
+class RandomForestModel:
+    """Small random-forest classifier for binary probability outputs."""
+
+    trees: list[_SimpleDecisionTree]
+
+    @classmethod
+    def fit(
+        cls,
+        X: np.ndarray,
+        y: np.ndarray,
+        n_trees: int = 25,
+        max_depth: int = 5,
+        min_samples_split: int = 12,
+        max_features: int | None = None,
+        bootstrap_ratio: float = 1.0,
+        seed: int = 42,
+    ) -> "RandomForestModel":
+        X = np.asarray(X, dtype=float)
+        y = np.asarray(y, dtype=float).reshape(-1)
+        rng = np.random.default_rng(seed)
+
+        trees: list[_SimpleDecisionTree] = []
+        n = X.shape[0]
+        n_boot = max(16, int(n * bootstrap_ratio))
+
+        for _ in range(n_trees):
+            boot_idx = rng.integers(0, n, size=n_boot)
+            tree_rng = np.random.default_rng(int(rng.integers(0, 1_000_000_000)))
+            tree = _SimpleDecisionTree.fit(
+                X[boot_idx],
+                y[boot_idx],
+                rng=tree_rng,
+                max_depth=max_depth,
+                min_samples_split=min_samples_split,
+                max_features=max_features,
+            )
+            trees.append(tree)
+
+        return cls(trees=trees)
+
+    def predict_proba(self, x: np.ndarray) -> float:
+        if not self.trees:
+            return 0.5
+        probs = [tree.predict_proba(x) for tree in self.trees]
+        return float(np.mean(probs))
 
 
 @dataclass
 class RobotMLPolicy:
     """Shared ML policy used by all robots in the pipeline."""
 
-    husky_model: LogisticModel
-    anymal_model: LogisticModel
-    arm_model: LogisticModel
+    husky_model: RandomForestModel
+    anymal_model: RandomForestModel
+    arm_model: RandomForestModel
 
     @classmethod
     def build_default(cls, seed: int = 42) -> "RobotMLPolicy":
@@ -121,9 +265,30 @@ class RobotMLPolicy:
             arm_y.append(float(safe))
 
         return cls(
-            husky_model=LogisticModel.fit(np.array(husky_X), np.array(husky_y)),
-            anymal_model=LogisticModel.fit(np.array(anymal_X), np.array(anymal_y)),
-            arm_model=LogisticModel.fit(np.array(arm_X), np.array(arm_y)),
+            husky_model=RandomForestModel.fit(
+                np.array(husky_X),
+                np.array(husky_y),
+                n_trees=27,
+                max_depth=5,
+                min_samples_split=10,
+                seed=seed + 1,
+            ),
+            anymal_model=RandomForestModel.fit(
+                np.array(anymal_X),
+                np.array(anymal_y),
+                n_trees=27,
+                max_depth=5,
+                min_samples_split=10,
+                seed=seed + 2,
+            ),
+            arm_model=RandomForestModel.fit(
+                np.array(arm_X),
+                np.array(arm_y),
+                n_trees=27,
+                max_depth=5,
+                min_samples_split=10,
+                seed=seed + 3,
+            ),
         )
 
     def husky_navigation_profile(
