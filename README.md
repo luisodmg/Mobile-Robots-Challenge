@@ -54,6 +54,33 @@ Implementar y demostrar un pipeline completo de manipulacion y logistica robotic
 - Sincronizacion por eventos para asegurar orden C -> B -> A.
 - Manejo de zonas de exclusion para evitar interferencias.
 
+### 2.5 Integracion de ML en la logica de los robots
+
+El proyecto incorpora una capa ligera de machine learning para ajustar el comportamiento
+de los robots sin reemplazar la logica clasica de control. La idea no es que el modelo
+"mande" por completo, sino que actue como un asesor numerico encima de las reglas ya
+existentes.
+
+En la implementacion actual se usa una politica compartida en [robot_ml_policy.py](robot_ml_policy.py), basada en modelos logisticos sencillos entrenados con datos sinteticos generados a partir del comportamiento esperado del propio sistema. Esa politica entrega tres tipos de recomendaciones:
+
+- Husky: escala la velocidad y el giro segun distancia al objetivo, error angular, distancia al obstaculo mas cercano y si el robot esta empujando una caja.
+- ANYmal: ajusta la agresividad de la marcha segun distancia al destino, payload y el valor minimo de det(J) observado en las patas.
+- PuzzleBot: modifica la fuerza de agarre y la suavidad de descenso segun margen de workspace, det(J) y altura del objetivo.
+
+La logica general es la siguiente:
+
+1. El robot calcula primero su comando clasico usando reglas conocidas, por ejemplo control proporcional, IK, o control de fuerza.
+2. Antes de ejecutar ese comando, consulta la politica ML con las variables de contexto relevantes.
+3. El resultado de la politica no sustituye al controlador, sino que escala o modula el comando final.
+4. Si la politica indica una situacion menos segura, el sistema sigue funcionando con la logica base, solo que de forma mas conservadora.
+
+Esto tiene dos ventajas principales:
+
+- Permite introducir ML en el pipeline sin perder interpretabilidad ni estabilidad.
+- Facilita una futura migracion a modelos mas avanzados, como random forest, usando las mismas variables de entrada.
+
+En otras palabras, el ML aqui cumple el papel de capa adaptativa: aprende patrones de decision a partir de variables ya disponibles en la simulacion y ajusta el comportamiento de cada robot de forma local.
+
 ## 3. Estructura del repositorio
 
 - anymal_gait.py
@@ -64,6 +91,9 @@ Implementar y demostrar un pipeline completo de manipulacion y logistica robotic
   - Orquestacion de fases, metricas y transiciones.
 - husky_pusher.py
   - Modelo Husky, LiDAR y estrategia de despeje.
+- robot_ml_policy.py
+  - Politica ML compartida para ajustar decisiones de Husky, ANYmal y PuzzleBot.
+  - Capa adaptativa ligera basada en modelos logisticos.
 - puzzlebot_arm.py
   - FK, IK, Jacobiano, fuerza->torque y pick/place.
 - sim.py

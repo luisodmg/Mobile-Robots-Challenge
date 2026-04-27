@@ -9,6 +9,8 @@ import numpy as np
 from typing import Tuple, Optional, List
 from torque_logger import torque_logger
 
+from robot_ml_policy import get_robot_policy
+
 
 class PuzzleBotArm:
     """Mini brazo planar de 3 DoF montado sobre un PuzzleBot.
@@ -46,6 +48,7 @@ class PuzzleBotArm:
         self.pose_log: List[np.ndarray] = []
         self.force_control_log: List[dict] = []  # Log for force control data
         self.time = 0.0  # Timestamp for logging
+        self.ml_policy = get_robot_policy()
 
     # ------------------------------------------------------------------
     # Cinemática Directa (FK)
@@ -161,6 +164,15 @@ class PuzzleBotArm:
 
     def grasp_box(self, box_pos: np.ndarray, grip_force: float = 5.0, steps: int = 30) -> bool:
         p_current = self.forward_kinematics()
+        det_j_current = self.jacobian_det()
+        workspace_margin = (self.l2 + self.l3) - np.linalg.norm(box_pos[:2])
+        grip_scale, descent_scale = self.ml_policy.arm_contact_profile(
+            workspace_margin=workspace_margin,
+            det_j=det_j_current,
+            target_height=float(box_pos[2]),
+        )
+        grip_force = float(np.clip(grip_force * grip_scale, 3.0, 6.5))
+        steps = max(18, int(steps * descent_scale))
 
         # Aproximación por encima de la caja
         p_pregrasp = box_pos + np.array([0, 0, 0.04])
@@ -190,7 +202,10 @@ class PuzzleBotArm:
 
         self.grasping = True
         self.grip_force = grip_force
-        print(f"[PuzzleBotArm] Agarre exitoso en {np.round(box_pos, 3)}. τ={np.round(tau, 4)} N·m | det(J)={det_J:.5f}")
+        print(
+            f"[PuzzleBotArm] Agarre exitoso en {np.round(box_pos, 3)}. "
+            f"τ={np.round(tau, 4)} N·m | det(J)={det_J:.5f} | grip={grip_force:.2f} N"
+        )
         return True
 
     def place_box(self, target_pos: np.ndarray, steps: int = 30) -> bool:
@@ -199,6 +214,15 @@ class PuzzleBotArm:
             return False
 
         p_current = self.forward_kinematics()
+        det_j_current = self.jacobian_det()
+        workspace_margin = (self.l2 + self.l3) - np.linalg.norm(target_pos[:2])
+        grip_scale, descent_scale = self.ml_policy.arm_contact_profile(
+            workspace_margin=workspace_margin,
+            det_j=det_j_current,
+            target_height=float(target_pos[2]),
+        )
+        contact_force_scale = float(np.clip(0.9 + 0.2 * (1.0 - grip_scale), 0.85, 1.15))
+        steps = max(18, int(steps * descent_scale))
         p_up = p_current + np.array([0, 0, 0.05])
         
         # Lift box
@@ -212,7 +236,7 @@ class PuzzleBotArm:
 
         # Descend with force control using Jacobian Transposed (τ = J^T * f)
         descent_steps = 10
-        contact_force = np.array([0.0, 0.0, -self.grip_force * 0.5])  # Contact force
+        contact_force = np.array([0.0, 0.0, -self.grip_force * 0.5 * contact_force_scale])  # Contact force
         
         for i, p in enumerate(self._cartesian_trajectory(p_above_target, target_pos, descent_steps)):
             if self.inverse_kinematics(p) is None: return False

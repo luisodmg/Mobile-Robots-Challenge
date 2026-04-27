@@ -9,6 +9,8 @@ import numpy as np
 from typing import List, Tuple, Optional
 from dataclasses import dataclass, field
 
+from robot_ml_policy import get_robot_policy
+
 
 # ---------------------------------------------------------------------------
 # Parámetros del ANYmal
@@ -177,6 +179,7 @@ class ANYmalGait:
         self.state = ANYmalState()
         self.dt = dt
         self.gait = TrotGait(dt=dt)
+        self.ml_policy = get_robot_policy()
 
         self.leg_kin = {
             name: LegKinematics(name, offset)
@@ -254,11 +257,20 @@ class ANYmalGait:
                 return True
 
             direction = np.array([dx, dy]) / (dist + 1e-9)
-            v_current = min(v, dist * 2.0)
+            det_j_min = min((leg.det_J for leg in self.state.legs.values()), default=1.0)
+            speed_scale, step_gain = self.ml_policy.anymal_speed_profile(
+                dist=dist,
+                det_j_min=det_j_min,
+                payload_kg=self.state.payload_kg,
+            )
+            v_current = min(v * speed_scale * step_gain, dist * 2.0)
             self._step(v_current, direction)
 
             if step_i % 500 == 0:
-                print(f"[ANYmal] t={step_i*self.dt:.1f}s | pos=({self.state.x:.2f},{self.state.y:.2f}) | dist={dist:.2f}m")
+                print(
+                    f"[ANYmal] t={step_i*self.dt:.1f}s | pos=({self.state.x:.2f},{self.state.y:.2f}) | "
+                    f"dist={dist:.2f}m | ML x{speed_scale:.2f}"
+                )
 
         dist_final = np.hypot(x_goal - self.state.x, y_goal - self.state.y)
         print(f"[ANYmal] ✗ Tiempo agotado. Error final={dist_final:.4f} m")

@@ -9,6 +9,8 @@ import numpy as np
 import time
 from typing import List, Tuple, Dict
 
+from robot_ml_policy import get_robot_policy
+
 
 # ---------------------------------------------------------------------------
 # Constantes del Husky A200
@@ -168,6 +170,7 @@ class HuskyPusher:
         self.controller = SkidSteerController(slip_factor)
         self.lidar = LiDAR2D()
         self.dt = dt
+        self.ml_policy = get_robot_policy()
 
         self.boxes = [
             Box("B1", x=2.5, y=0.0),
@@ -218,6 +221,23 @@ class HuskyPusher:
                 v_des = 0.0
 
             w_des = 2.5 * angle_err
+
+            nearest_box_dist = min(
+                (
+                    np.hypot(box.x - self.state.x, box.y - self.state.y)
+                    for box in self.boxes
+                    if not box.cleared
+                ),
+                default=2.0,
+            )
+            speed_scale, turn_gain = self.ml_policy.husky_navigation_profile(
+                dist=dist,
+                angle_err=angle_err,
+                nearest_box_dist=nearest_box_dist,
+                pushing=pushing,
+            )
+            v_des *= speed_scale
+            w_des *= turn_gain
 
             v_cmd, w_cmd = self.controller.compute(self.state, v_des, w_des, self.dt)
             self._integrate(v_cmd, w_cmd)
@@ -329,6 +349,23 @@ class HuskyPusher:
 
         w_des = 2.5 * angle_err
 
+        nearest_box_dist = min(
+            (
+                np.hypot(box.x - self.state.x, box.y - self.state.y)
+                for box in self.boxes
+                if not box.cleared
+            ),
+            default=2.0,
+        )
+        speed_scale, turn_gain = self.ml_policy.husky_navigation_profile(
+            dist=dist,
+            angle_err=angle_err,
+            nearest_box_dist=nearest_box_dist,
+            pushing=pushing,
+        )
+        v_des *= speed_scale
+        w_des *= turn_gain
+
         v_cmd, w_cmd = self.controller.compute(self.state, v_des, w_des, self.dt)
         self._integrate(v_cmd, w_cmd)
         self.time += self.dt
@@ -381,6 +418,22 @@ class HuskyPusher:
     def push_box(self, box: Box) -> bool:
         """Versión bloqueante con puntos intermedios."""
         print(f"\n[HuskyPusher] Aproximación segura a caja {box.id}")
+
+        nearest_box_dist = min(
+            (
+                np.hypot(other.x - self.state.x, other.y - self.state.y)
+                for other in self.boxes
+                if not other.cleared
+            ),
+            default=2.0,
+        )
+        speed_scale, turn_gain = self.ml_policy.husky_navigation_profile(
+            dist=np.hypot(box.x - self.state.x, box.y - self.state.y),
+            angle_err=self._wrap_angle(np.arctan2(box.y - self.state.y, box.x - self.state.x) - self.state.theta),
+            nearest_box_dist=nearest_box_dist,
+            pushing=False,
+        )
+        print(f"[HuskyML] perfil navegación: velocidad x{speed_scale:.2f}, giro x{turn_gain:.2f}")
 
         push_dir_y = 1.0 if box.y >= 0 else -1.0
         push_target_y = push_dir_y * (self.CORRIDOR_Y_MAX + box.height + 0.3)
