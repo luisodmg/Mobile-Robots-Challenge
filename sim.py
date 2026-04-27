@@ -127,8 +127,8 @@ class Sim2D:
                 ha="center", va="center", alpha=0.7)
 
         # Destino del ANYmal
-        ax.plot(*[11.0, 3.6], "o", color="#4a90d9", markersize=10, alpha=0.5)
-        ax.text(11.0, 3.2, "Destino\nANYmal", color="#4a90d9", fontsize=7,
+        ax.plot(*[11.5, 4.8], "o", color="#4a90d9", markersize=10, alpha=0.5)
+        ax.text(11.5, 4.4, "Destino\nANYmal", color="#4a90d9", fontsize=7,
                 ha="center", alpha=0.8)
 
         # Pila destino
@@ -377,7 +377,7 @@ class Sim2D:
             np.array([2.0, 0.0]),    # Entrar al corredor
             np.array([7.0, 0.0]),    # Final del corredor
             np.array([8.5, 2.0]),    # Giro hacia zona de trabajo
-            np.array([11.0, 3.6]),   # Destino final
+            np.array([11.5, 4.8]),   # Destino final (lejos de la pila)
         ]
         
         total_dist = sum(
@@ -428,10 +428,11 @@ class Sim2D:
         
         # PuzzleBots bajan del ANYmal uno por uno (animado)
         anymal_x, anymal_y = self.anymal.state.x, self.anymal.state.y
+        # Posiciones de trabajo cerca de las cajas (no del ANYmal)
         pb_targets = [
-            np.array([anymal_x + 0.5, anymal_y - 0.6, 0.0]),
-            np.array([anymal_x + 0.5, anymal_y,       0.0]),
-            np.array([anymal_x + 0.5, anymal_y + 0.6, 0.0]),
+            np.array([9.3, 3.0, 0.0]),   # Cerca de caja C
+            np.array([9.6, 3.0, 0.0]),   # Cerca de caja B
+            np.array([9.9, 3.0, 0.0]),   # Cerca de caja A
         ]
         stack_order = ["C", "B", "A"]
         
@@ -445,16 +446,38 @@ class Sim2D:
             pb.completed_event = None
             pb.pos = np.array([anymal_x, anymal_y, 0.0])
         
-        # Animar descenso uno por uno
+        # Animar descenso uno por uno hacia zona de trabajo
         for i, pb in enumerate(self.coord.puzzlebots):
             target = pb_targets[i]
-            print(f"[Sim2D] PB{i} bajando del ANYmal...")
-            for s in range(200):
+            print(f"[Sim2D] PB{i} bajando del ANYmal hacia zona de trabajo...")
+            for s in range(800):
                 delta = target[:2] - pb.pos[:2]
                 dist = np.linalg.norm(delta)
                 if dist < 0.05:
                     break
-                pb.pos[:2] += 0.3 * self.dt * delta / (dist + 1e-9)
+                move_dir = delta / (dist + 1e-9)
+                
+                # Evitar al ANYmal
+                to_anymal = np.array([anymal_x, anymal_y]) - pb.pos[:2]
+                d_anymal = np.linalg.norm(to_anymal)
+                if d_anymal < 0.6:
+                    perp = np.array([-to_anymal[1], to_anymal[0]]) / (d_anymal + 1e-9)
+                    repel = -to_anymal / (d_anymal + 1e-9)
+                    move_dir = move_dir + 1.5 * perp + 0.5 * repel
+                    move_dir = move_dir / (np.linalg.norm(move_dir) + 1e-9)
+                
+                # Evitar otros PBs
+                for j, other_pb in enumerate(self.coord.puzzlebots):
+                    if j == i:
+                        continue
+                    to_other = other_pb.pos[:2] - pb.pos[:2]
+                    d_other = np.linalg.norm(to_other)
+                    if d_other < 0.35:
+                        repel = -to_other / (d_other + 1e-9)
+                        move_dir = move_dir + 0.8 * repel
+                        move_dir = move_dir / (np.linalg.norm(move_dir) + 1e-9)
+                
+                pb.pos[:2] += 0.2 * self.dt * move_dir
                 pb_positions_phase3[i] = pb.pos.copy()
                 if live_display and s % 8 == 0:
                     self._refresh_live_view(
@@ -483,9 +506,11 @@ class Sim2D:
                     if pb.done:
                         continue
                     
-                    # Sin exclusion zones — la sincronización por eventos es suficiente
+                    # Solo ANYmal como obstáculo (event sync ya previene conflictos entre PBs)
+                    obstacles = [(np.array([anymal_x, anymal_y]), 0.6)]
                     success, new_h = pb.pick_and_stack_nonblocking(
-                        pb.assigned_box, stack_height, [], event_flags
+                        pb.assigned_box, stack_height, [], event_flags,
+                        obstacles=obstacles
                     )
                     
                     if success:
@@ -499,10 +524,11 @@ class Sim2D:
                         stack_pos = np.array([10.5, 3.6, stack_height - SmallBox.BOX_HEIGHT])
                         self.stack_boxes.append({"name": pb.assigned_box, "pos": stack_pos.copy()})
                         
-                        # PuzzleBot regresa a su posición original
-                        pb.pos = pb_targets[i].copy()
+                        # PuzzleBot se aparta un poco de la pila (sin teleport)
+                        offset = np.array([-0.3, 0.3 * (i - 1), 0.0])
+                        pb.pos = pb.pos + offset
                         pb_positions_phase3[i] = pb.pos.copy()
-                        print(f"[Sim2D] ✓ Caja {pb.assigned_box} apilada — PB{i} regresa a ({pb.pos[0]:.1f}, {pb.pos[1]:.1f})")
+                        print(f"[Sim2D] ✓ Caja {pb.assigned_box} apilada — PB{i} se aparta")
 
                 
                 # Check if phase 3 is complete
@@ -655,7 +681,7 @@ class Sim2D:
                     ha="center", va="center", fontweight="bold")
 
         # Destino ANYmal
-        ax.plot(11.0, 3.6, "o", color="#4a90d9", markersize=6, alpha=0.5, zorder=2)
+        ax.plot(11.5, 4.8, "o", color="#4a90d9", markersize=6, alpha=0.5, zorder=2)
         ax.plot(10.5, 3.6, "^", color=COLORS["stack"], markersize=6, alpha=0.5, zorder=2)
 
 
@@ -684,7 +710,7 @@ def plot_metrics(anymal: ANYmalGait, husky: HuskyPusher, output_path: str = "met
         traj = np.array(anymal.pos_log)
         ax.plot(traj[:, 0], traj[:, 1], color=COLORS["anymal"], linewidth=1.5, label="ANYmal")
         ax.plot(traj[0, 0], traj[0, 1], "go", markersize=8, label="Inicio")
-        ax.plot(11.0, 3.6, "r*", markersize=12, label="Destino")
+        ax.plot(11.5, 4.8, "r*", markersize=12, label="Destino")
     ax.set_title("Trayectoria ANYmal", color=COLORS["text"])
     ax.set_xlabel("x [m]", color=COLORS["text"])
     ax.set_ylabel("y [m]", color=COLORS["text"])

@@ -171,7 +171,7 @@ class TrotGait:
 
 
 class ANYmalGait:
-    DEST = np.array([11.0, 3.6])  # Zona de trabajo
+    DEST = np.array([11.5, 4.8])  # Zona de trabajo
 
     def __init__(self, dt: float = 0.01):
         self.state = ANYmalState()

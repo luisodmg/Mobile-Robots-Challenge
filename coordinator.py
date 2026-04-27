@@ -170,7 +170,8 @@ class PuzzleBot:
         box_name: str,
         stack_height: float,
         exclusion_zones: List[Tuple[np.ndarray, float]],
-        event_flags: dict
+        event_flags: dict,
+        obstacles: List[Tuple[np.ndarray, float]] = None
     ) -> Tuple[bool, float]:
         """Event-based non-blocking version of pick_and_stack."""
         
@@ -196,7 +197,7 @@ class PuzzleBot:
             
         elif self.state == "MOVING_TO_BOX":
             approach = np.array([box_pos[0] - 0.12, box_pos[1], 0.0])
-            if self._step_move_to(approach):
+            if self._step_move_to(approach, obstacles=obstacles):
                 self.state = "GRASPING"
                 self.arm.reset()
             return False, stack_height
@@ -212,7 +213,7 @@ class PuzzleBot:
             
         elif self.state == "MOVING_TO_STACK":
             stack_approach = np.array([self.stack_target_pos[0] - 0.12, self.stack_target_pos[1], 0.0])
-            if self._step_move_to(stack_approach):
+            if self._step_move_to(stack_approach, obstacles=obstacles):
                 self.state = "PLACING"
             return False, stack_height
             
@@ -232,13 +233,30 @@ class PuzzleBot:
             
         return False, stack_height
     
-    def _step_move_to(self, target: np.ndarray, v: float = 0.2) -> bool:
-        """Single step of movement for non-blocking operation."""
+    def _step_move_to(self, target: np.ndarray, v: float = 0.2,
+                       obstacles: List[Tuple[np.ndarray, float]] = None) -> bool:
+        """Single step of movement with obstacle avoidance."""
         delta = target[:2] - self.pos[:2]
         dist = np.linalg.norm(delta)
         if dist < 0.02:
             return True
-        self.pos[:2] += v * self.dt * delta / (dist + 1e-9)
+        
+        move_dir = delta / (dist + 1e-9)
+        
+        # Obstacle avoidance: if near an obstacle, add perpendicular steering
+        if obstacles:
+            for (obs_pos, obs_radius) in obstacles:
+                to_obs = obs_pos[:2] - self.pos[:2]
+                obs_dist = np.linalg.norm(to_obs)
+                if obs_dist < obs_radius:
+                    # Perpendicular to obstacle direction (go around)
+                    perp = np.array([-to_obs[1], to_obs[0]]) / (obs_dist + 1e-9)
+                    # Push away from obstacle
+                    repel = -to_obs / (obs_dist + 1e-9)
+                    move_dir = move_dir + 1.5 * perp + 0.5 * repel
+                    move_dir = move_dir / (np.linalg.norm(move_dir) + 1e-9)
+        
+        self.pos[:2] += v * self.dt * move_dir
         return False
         
     def pick_and_stack(
