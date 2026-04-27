@@ -6,9 +6,15 @@ force control implementation and generate reports for the rubric requirements.
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
 from typing import List, Dict
 import json
+
+try:
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+    print("[WARNING] matplotlib not available. Plotting disabled.")
 
 class TorqueLogger:
     """Logger and analyzer for torque data from force control operations."""
@@ -86,6 +92,10 @@ class TorqueLogger:
         
     def plot_torque_analysis(self, output_path: str = "torque_analysis.png"):
         """Generate torque analysis plots for technical report."""
+        if not MATPLOTLIB_AVAILABLE:
+            print("[TorqueLogger] matplotlib not available. Skipping plot generation.")
+            return
+            
         if not self.torque_history:
             print("[TorqueLogger] No torque data to plot")
             return

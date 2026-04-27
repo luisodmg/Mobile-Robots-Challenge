@@ -23,6 +23,7 @@ from husky_pusher import HuskyPusher, Box
 from anymal_gait import ANYmalGait
 from coordinator import Coordinator, Phase, SmallBox
 from torque_logger import torque_logger
+from robot_ml import ml_system
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +270,14 @@ class Sim2D:
         )
 
         if show_anymal:
-            self._draw_anymal_with_pbs(self.ax, self.anymal.state, pb_positions or [])
+            self._draw_anymal_with_pbs(self.ax, self.anymal.state, [])
+        
+        if pb_positions is not None:
+            for i, pb_pos in enumerate(pb_positions):
+                self.ax.plot(pb_pos[0], pb_pos[1], "s", color=COLORS["puzzlebot"],
+                             markersize=10, zorder=6)
+                self.ax.text(pb_pos[0], pb_pos[1] - 0.35, f"PB{i}",
+                             color=COLORS["puzzlebot"], fontsize=7, ha="center")
 
         for box_info in self.stack_boxes:
             bname = box_info["name"]
@@ -304,6 +312,7 @@ class Sim2D:
         # ── Fase 1: Husky (Non-blocking) ───────────────────────────────────
         print("[Sim2D] Fase 1: Husky despejando corredor (animación fluida)...")
         self.current_phase = "FASE 1: Husky despeja corredor"
+        print("[ML] Husky - Logistic Regression activado")
         
         # Reset Husky state machine for non-blocking operation
         self.husky.nav_state = "IDLE"
@@ -357,70 +366,106 @@ class Sim2D:
         # ── Fase 2: ANYmal ────────────────────────────────────────────
         print("[Sim2D] Fase 2: ANYmal caminando...")
         self.current_phase = "FASE 2: ANYmal transportando PuzzleBots"
-        dest = np.array([11.0, 3.6])
+        
+        # ANYmal empieza detrás del Husky, lo rodea por abajo
+        self.anymal.state.x = -0.5
+        self.anymal.state.y = -1.5
+        
+        # Waypoints: rodear Husky → corredor → zona de trabajo
+        waypoints = [
+            np.array([1.5, -1.5]),   # Rodear al Husky por abajo
+            np.array([2.0, 0.0]),    # Entrar al corredor
+            np.array([7.0, 0.0]),    # Final del corredor
+            np.array([8.5, 2.0]),    # Giro hacia zona de trabajo
+            np.array([11.0, 3.6]),   # Destino final
+        ]
+        
+        total_dist = sum(
+            np.linalg.norm(waypoints[i] - (waypoints[i-1] if i > 0 else self.anymal.state.pos2d))
+            for i in range(len(waypoints))
+        )
+        eta = ml_system.anymal_predict_eta(total_dist, 6.0)
+        print(f"[ML] ANYmal ETA: {eta:.1f}s para {total_dist:.2f}m (Linear Regression)")
 
-        for step in range(2000):
-            dx = dest[0] - self.anymal.state.x
-            dy = dest[1] - self.anymal.state.y
-            dist = np.hypot(dx, dy)
-            if dist < 0.15:
-                print(f"[Sim2D] ✓ ANYmal llegó. Error={dist:.4f} m")
-                break
-            direction = np.array([dx, dy]) / (dist + 1e-9)
-            v = min(0.4, dist * 2.0)
-            self.anymal._step(v, direction)
+        for dest in waypoints:
+            for step in range(2000):
+                dx = dest[0] - self.anymal.state.x
+                dy = dest[1] - self.anymal.state.y
+                dist = np.hypot(dx, dy)
+                if dist < 0.3:
+                    break
+                direction = np.array([dx, dy]) / (dist + 1e-9)
+                v = min(0.4, dist * 2.0)
+                self.anymal._step(v, direction)
 
-            if step % 50 == 0:
-                pb_offsets = [np.array([self.anymal.state.x + (i-1)*0.15, self.anymal.state.y, 0.5])
-                              for i in range(3)]
-                frame_data = {
-                    "phase": "phase2",
-                    "husky": (self.husky.state.x, self.husky.state.y, self.husky.state.theta),
-                    "boxes": [(b.x, b.y, b.cleared) for b in self.husky.boxes],
-                    "anymal": self.anymal.state,
-                    "pbs": pb_offsets,
-                    "det_J": self.anymal.det_J_summary(),
-                }
-                all_frames_data.append(frame_data)
+                if step % 50 == 0:
+                    pb_offsets = [np.array([self.anymal.state.x + (i-1)*0.15, self.anymal.state.y, 0.5])
+                                  for i in range(3)]
+                    frame_data = {
+                        "phase": "phase2",
+                        "husky": (self.husky.state.x, self.husky.state.y, self.husky.state.theta),
+                        "boxes": [(b.x, b.y, b.cleared) for b in self.husky.boxes],
+                        "anymal": self.anymal.state,
+                        "pbs": pb_offsets,
+                        "det_J": self.anymal.det_J_summary(),
+                    }
+                    all_frames_data.append(frame_data)
 
-            if live_display and (step % 10 == 0 or dist < 0.15):
-                pb_offsets = [np.array([self.anymal.state.x + (i - 1) * 0.15, self.anymal.state.y, 0.5])
-                              for i in range(3)]
-                metrics = {
-                    "Distancia al destino": f"{dist:.2f} m",
-                    "Posición": f"({self.anymal.state.x:.2f}, {self.anymal.state.y:.2f})",
-                }
-                self._refresh_live_view(self.current_phase, metrics, show_anymal=True, pb_positions=pb_offsets)
-
-        if live_display:
-            pb_offsets = [np.array([self.anymal.state.x + (i - 1) * 0.15, self.anymal.state.y, 0.5])
-                          for i in range(3)]
-            self._refresh_live_view(
-                self.current_phase,
-                {
-                    "Distancia al destino": f"{np.linalg.norm(dest - self.anymal.state.pos2d):.2f} m",
-                    "Posición": f"({self.anymal.state.x:.2f}, {self.anymal.state.y:.2f})",
-                },
-                show_anymal=True,
-                pb_positions=pb_offsets,
-            )
+                if live_display and (step % 10 == 0):
+                    pb_offsets = [np.array([self.anymal.state.x + (i - 1) * 0.15, self.anymal.state.y, 0.5])
+                                  for i in range(3)]
+                    metrics = {
+                        "Distancia al destino": f"{np.linalg.norm(waypoints[-1] - self.anymal.state.pos2d):.2f} m",
+                        "Posición": f"({self.anymal.state.x:.2f}, {self.anymal.state.y:.2f})",
+                    }
+                    self._refresh_live_view(self.current_phase, metrics, show_anymal=True, pb_positions=pb_offsets)
+        
+        print(f"[Sim2D] ✓ ANYmal llegó. Error={np.linalg.norm(waypoints[-1] - self.anymal.state.pos2d):.4f} m")
 
         # ── Fase 3: PuzzleBots (Real stacking with force control) ────────
         print("[Sim2D] Fase 3: PuzzleBots apilando con control de fuerza real...")
-        self.current_phase = "FASE 3: PuzzleBots apilando C-B-A (τ=J^T*f)"
+        self.current_phase = "FASE 3: PUZZLEBOTS"
         
-        # Initialize PuzzleBots for real stacking
-        pb_positions_phase3 = [
-            np.array([9.0 + i * 0.4, 3.6, 0.0]) for i in range(3)
+        # PuzzleBots bajan del ANYmal uno por uno (animado)
+        anymal_x, anymal_y = self.anymal.state.x, self.anymal.state.y
+        pb_targets = [
+            np.array([anymal_x + 0.5, anymal_y - 0.6, 0.0]),
+            np.array([anymal_x + 0.5, anymal_y,       0.0]),
+            np.array([anymal_x + 0.5, anymal_y + 0.6, 0.0]),
         ]
         stack_order = ["C", "B", "A"]
         
-        # Reset PuzzleBot states for non-blocking operation
+        # Todos empiezan en la posición del ANYmal
+        pb_positions_phase3 = [
+            np.array([anymal_x, anymal_y, 0.0]) for _ in range(3)
+        ]
         for i, pb in enumerate(self.coord.puzzlebots):
             pb.state = "IDLE"
             pb.done = False
             pb.completed_event = None
-            pb.pos = pb_positions_phase3[i].copy()
+            pb.pos = np.array([anymal_x, anymal_y, 0.0])
+        
+        # Animar descenso uno por uno
+        for i, pb in enumerate(self.coord.puzzlebots):
+            target = pb_targets[i]
+            print(f"[Sim2D] PB{i} bajando del ANYmal...")
+            for s in range(200):
+                delta = target[:2] - pb.pos[:2]
+                dist = np.linalg.norm(delta)
+                if dist < 0.05:
+                    break
+                pb.pos[:2] += 0.3 * self.dt * delta / (dist + 1e-9)
+                pb_positions_phase3[i] = pb.pos.copy()
+                if live_display and s % 8 == 0:
+                    self._refresh_live_view(
+                        self.current_phase,
+                        {"Estado": f"PB{i} bajando del ANYmal..."},
+                        show_anymal=True, pb_positions=pb_positions_phase3,
+                    )
+            pb.pos = target.copy()
+            pb_positions_phase3[i] = pb.pos.copy()
+            zone = ml_system.puzzlebot_get_zone(pb.pos)
+            print(f"[ML] PuzzleBot {pb.id} en posición → zona: {zone} (K-Means)")
         
         # Event-based synchronization
         event_flags = {
@@ -432,23 +477,15 @@ class Sim2D:
         stack_height = 0.0
         phase3_complete = False
         
-        for step in range(2400):  # More steps for detailed animation
+        for step in range(2400):
             if not phase3_complete:
-                # Update each PuzzleBot
                 for i, pb in enumerate(self.coord.puzzlebots):
                     if pb.done:
                         continue
-                        
-                    # Check exclusion zones
-                    exclusion = [
-                        (self.coord.puzzlebots[j].pos, 0.25)
-                        for j in range(3)
-                        if j != i and not self.coord.puzzlebots[j].done
-                    ]
                     
-                    # Use event-based non-blocking stacking
+                    # Sin exclusion zones — la sincronización por eventos es suficiente
                     success, new_h = pb.pick_and_stack_nonblocking(
-                        pb.assigned_box, stack_height, exclusion, event_flags
+                        pb.assigned_box, stack_height, [], event_flags
                     )
                     
                     if success:
@@ -462,7 +499,11 @@ class Sim2D:
                         stack_pos = np.array([10.5, 3.6, stack_height - SmallBox.BOX_HEIGHT])
                         self.stack_boxes.append({"name": pb.assigned_box, "pos": stack_pos.copy()})
                         
-                        print(f"[Sim2D] ✓ Caja {pb.assigned_box} apilada con control de fuerza")
+                        # PuzzleBot regresa a su posición original
+                        pb.pos = pb_targets[i].copy()
+                        pb_positions_phase3[i] = pb.pos.copy()
+                        print(f"[Sim2D] ✓ Caja {pb.assigned_box} apilada — PB{i} regresa a ({pb.pos[0]:.1f}, {pb.pos[1]:.1f})")
+
                 
                 # Check if phase 3 is complete
                 phase3_complete = all(pb.done for pb in self.coord.puzzlebots)
@@ -477,7 +518,7 @@ class Sim2D:
                     "phase": "phase3",
                     "husky": (self.husky.state.x, self.husky.state.y, 0),
                     "boxes": [(b.x, b.y, b.cleared) for b in self.husky.boxes],
-                    "anymal": None,
+                    "anymal": self.anymal.state,
                     "pbs": pb_positions_phase3.copy(),
                     "stack": list(self.stack_boxes),
                     "stack_height": stack_height,
@@ -495,7 +536,7 @@ class Sim2D:
                 }
                 self._refresh_live_view(
                     self.current_phase, metrics,
-                    show_anymal=False,
+                    show_anymal=True,
                     pb_positions=pb_positions_phase3,
                 )
             
@@ -504,6 +545,11 @@ class Sim2D:
                 break
 
         # ── Renderizar frames clave ───────────────────────────────────
+        total_time = self.husky.time + 30.0 + 40.0
+        predicted = ml_system.coordinator_predict_mission(self.husky.time, 30.0, 40.0)
+        print(f"\n[ML] Coordinator - Ridge Regression:")
+        print(f"  Tiempo predicho: {predicted:.1f}s")
+        
         self._render_composite(all_frames_data, output_path)
         print(f"[Sim2D] Imagen guardada en {output_path}")
 
