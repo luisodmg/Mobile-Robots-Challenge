@@ -137,6 +137,68 @@ The simulation will:
 - Replanning events: Dynamic adaptations
 - Fleet efficiency: Tasks per robot-time
 
+## Theoretical Background
+
+### Vision-Based Perception
+
+**Color Detection**
+Objects are classified by dominant RGB channel. For each detection, the system compares R, G, B values to determine object type (obstacles, robots, landmarks).
+
+**Contour Analysis**
+Bounding boxes are extracted from detections and filtered by area (50-10000 px²). Object size is estimated from contour dimensions using perspective projection.
+
+**Distance Estimation**
+Distance d is computed from pixel size using pinhole camera model:
+```
+d = (real_size × focal_length) / pixel_size
+```
+where focal_length is calibrated to 200 pixels.
+
+**ArUco Landmarks**
+Fiducial markers provide absolute position references. The system detects 4 ArUco markers at known positions for visual localization.
+
+### Path Planning
+
+**A\* Algorithm**
+The planner uses A\* search on a discretized 2D grid (0.15m resolution). Cost function:
+```
+f(n) = g(n) + h(n)
+```
+where g(n) is path cost from start and h(n) is Euclidean heuristic to goal.
+
+**Dynamic Replanning**
+When visual perception detects new obstacles, the system:
+1. Adds obstacle to occupancy grid
+2. Invalidates current path if blocked
+3. Triggers A\* replanning from current position
+4. Logs replanning event for metrics
+
+### Force Control
+
+**Jacobian Transpose Method**
+For 3-DOF planar arm, joint torques τ are computed from desired Cartesian force f:
+```
+τ = J^T × f
+```
+where J is the 3×3 analytical Jacobian matrix.
+
+**Singularity Detection**
+Singularities are monitored via Jacobian determinant:
+```
+|det(J)| < 10^-3  →  singularity warning
+```
+
+### Multi-Robot Coordination
+
+**Task Allocation**
+Greedy strategy assigns each task to nearest available robot. Distance metric is Euclidean norm in workspace.
+
+**Event-Based Synchronization**
+PuzzleBots stack in order C → B → A using event flags. Each robot waits for predecessor's completion event before starting.
+
+**Collision Avoidance**
+Exclusion zones (0.5m radius) prevent inter-robot collisions. Visual perception triggers avoidance when obstacles detected within threshold.
+
 ## Dependencies
 
 - Python 3.10+
