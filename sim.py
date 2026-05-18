@@ -1,10 +1,10 @@
 """
-sim.py — Simulador 2D (matplotlib) del escenario completo con visualización animada.
+sim.py - 2D simulator (matplotlib) of complete scenario with animated visualization.
 
-Muestra las tres fases en tiempo real:
-    1. Husky empujando cajas
-    2. ANYmal caminando con PuzzleBots
-    3. PuzzleBots apilando cajas A-B-C
+Shows three phases in real-time:
+    1. Husky pushing boxes
+    2. ANYmal walking with PuzzleBots
+    3. PuzzleBots stacking boxes A-B-C
 """
 
 import numpy as np
@@ -25,7 +25,7 @@ from coordinator import Coordinator, Phase, SmallBox
 from torque_logger import torque_logger
 from robot_ml import ml_system
 
-# Módulos de visión por computadora y métricas del hackathon
+# Computer vision modules and hackathon metrics
 from vision_camera import VisionCamera, create_box_object, create_landmark_object
 from vision_perception import VisionPerception
 from pathfinding import AStarPlanner, create_warehouse_planner
@@ -35,7 +35,7 @@ import vision_config as vc
 
 
 # ---------------------------------------------------------------------------
-# Paleta de colores
+# Color Palette
 # ---------------------------------------------------------------------------
 COLORS = {
     "bg":          "#0f1117",
