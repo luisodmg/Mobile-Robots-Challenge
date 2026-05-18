@@ -1,15 +1,15 @@
 """
-husky_pusher.py — Nodo que comanda el Husky A200 para empujar cajas.
+husky_pusher.py - Node commanding Husky A200 for box pushing.
 
-Modelo: skid-steer con compensación de deslizamiento.
-Sensor: LiDAR 2D simulado.
+Model: skid-steer with slip compensation.
+Sensor: Simulated 2D LiDAR.
 """
 
 import numpy as np
 import time
 from typing import List, Tuple, Dict, Optional
 
-# Módulos de visión por computadora
+# Computer vision modules
 from vision_camera import VisionCamera, create_box_object, create_landmark_object
 from vision_perception import VisionPerception
 from pathfinding import AStarPlanner
@@ -17,15 +17,15 @@ from metrics_tracker import metrics_tracker
 
 
 # ---------------------------------------------------------------------------
-# Constantes del Husky A200
+# Husky A200 Constants
 # ---------------------------------------------------------------------------
-HUSKY_WIDTH = 0.67      # m, separación entre centros de ruedas
+HUSKY_WIDTH = 0.67      # m, separation between wheel centers
 HUSKY_MAX_V = 1.0       # m/s
 HUSKY_MAX_W = 1.5       # rad/s
 
 
 class HuskyState:
-    """Estado cinemático del Husky."""
+    """Kinematic state of Husky."""
 
     def __init__(self, x: float = 0.0, y: float = 0.0, theta: float = 0.0):
         self.x = x

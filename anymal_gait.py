@@ -1,7 +1,7 @@
 """
-anymal_gait.py — Generador de marcha trote del ANYmal con FK/IK por pata.
+anymal_gait.py - ANYmal trot gait generator with per-leg FK/IK.
 
-Monitorea det(J) para evitar singularidades.
+Monitors det(J) to avoid singularities.
 Payload: 3 PuzzleBots ≈ 6 kg.
 """
 
@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 
 # ---------------------------------------------------------------------------
-# Parámetros del ANYmal
+# ANYmal Parameters
 # ---------------------------------------------------------------------------
 ANYMAL_BODY_LENGTH = 0.55   # m
 ANYMAL_BODY_WIDTH  = 0.34   # m
@@ -22,13 +22,13 @@ ANYMAL_LEG_OFFSETS = {
     "RH": np.array([-ANYMAL_BODY_LENGTH / 2, -ANYMAL_BODY_WIDTH / 2, 0.0]),
 }
 
-L_HAA = 0.0   # offset lateral (simplificado)
-L_HFE = 0.20  # fémur
+L_HAA = 0.0   # lateral offset (simplified)
+L_HFE = 0.20  # femur
 L_KFE = 0.21  # tibia
 
-H_NOMINAL = 0.42   # Altura nominal
+H_NOMINAL = 0.42   # Nominal height
 
-# Singularidad: |det(J)| mínimo permitido
+# Singularity: minimum allowed |det(J)|
 DET_J_MIN = 1e-3
 
 
