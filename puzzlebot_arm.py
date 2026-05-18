@@ -1,8 +1,8 @@
 """
-puzzlebot_arm.py — Mini brazo planar de 3 DoF del PuzzleBot.
+puzzlebot_arm.py - 3-DOF planar arm for PuzzleBot.
 
-Configuración: base rotacional (q1) + 2 eslabones en plano vertical (q2, q3).
-Unidades: metros, radianes, Newtons, N·m.
+Configuration: rotational base (q1) + 2 links in vertical plane (q2, q3).
+Units: meters, radians, Newtons, N·m.
 """
 
 import numpy as np
@@ -11,44 +11,44 @@ from torque_logger import torque_logger
 
 
 class PuzzleBotArm:
-    """Mini brazo planar de 3 DoF montado sobre un PuzzleBot.
+    """3-DOF planar arm mounted on PuzzleBot.
 
-    Configuración:
-        - q1: rotación de la base (yaw, en plano XY)
-        - q2: ángulo del primer eslabón (hombro, en plano vertical)
-        - q3: ángulo del segundo eslabón (codo, en plano vertical)
+    Configuration:
+        - q1: base rotation (yaw, in XY plane)
+        - q2: first link angle (shoulder, in vertical plane)
+        - q3: second link angle (elbow, in vertical plane)
 
-    Marco de referencia: origen en la base del brazo (montado sobre el PuzzleBot).
+    Reference frame: origin at arm base (mounted on PuzzleBot).
     """
 
     def __init__(self, l1: float = 0.05, l2: float = 0.12, l3: float = 0.10):
         """
         Args:
-            l1: Altura de la base al hombro [m].
-            l2: Longitud del primer eslabón dinámico [m].
-            l3: Longitud del segundo eslabón dinámico [m].
+            l1: Height from base to shoulder [m].
+            l2: Length of first dynamic link [m].
+            l3: Length of second dynamic link [m].
         """
         self.l1 = l1
         self.l2 = l2
         self.l3 = l3
-        self.q = np.zeros(3)  # [q1, q2, q3] en radianes
+        self.q = np.zeros(3)  # [q1, q2, q3] in radians
 
-        # Límites articulares [rad]
+        # Joint limits [rad]
         self.q_min = np.array([-np.pi, -np.pi / 2, -np.pi * 0.9])
         self.q_max = np.array([np.pi, np.pi, np.pi * 0.9])
 
-        # Estado de agarre
+        # Grasp state
         self.grasping = False
         self.grip_force = 0.0
 
-        # Historial para logging
+        # History for logging
         self.torque_log: List[np.ndarray] = []
         self.pose_log: List[np.ndarray] = []
-        self.force_control_log: List[dict] = []  # Log for force control data
-        self.time = 0.0  # Timestamp for logging
+        self.force_control_log: List[dict] = []
+        self.time = 0.0
 
     # ------------------------------------------------------------------
-    # Cinemática Directa (FK)
+    # Forward Kinematics (FK)
     # ------------------------------------------------------------------
 
     def forward_kinematics(self, q: Optional[np.ndarray] = None) -> np.ndarray:
@@ -57,10 +57,10 @@ class PuzzleBotArm:
 
         q1, q2, q3 = self.q
 
-        # Proyección horizontal del brazo (radio desde el eje de q1)
+        # Horizontal projection of arm (radius from q1 axis)
         r = self.l2 * np.cos(q2) + self.l3 * np.cos(q2 + q3)
 
-        # Posición 3D
+        # 3D position
         x = r * np.cos(q1)
         y = r * np.sin(q1)
         z = self.l1 + self.l2 * np.sin(q2) + self.l3 * np.sin(q2 + q3)
@@ -70,36 +70,36 @@ class PuzzleBotArm:
         return p
 
     # ------------------------------------------------------------------
-    # Cinemática Inversa (IK)
+    # Inverse Kinematics (IK)
     # ------------------------------------------------------------------
 
     def inverse_kinematics(self, p_des: np.ndarray) -> Optional[np.ndarray]:
         x, y, z = p_des
 
-        # --- q1: ángulo de la base (yaw) ---
+        # --- q1: base angle (yaw) ---
         q1 = np.arctan2(y, x)
 
-        # --- Resolución en el plano vertical ---
+        # --- Resolution in vertical plane ---
         r = np.sqrt(x**2 + y**2)
-        z_prime = z - self.l1  # Restamos la altura de la base
+        z_prime = z - self.l1  # Subtract base height
 
         D_sq = r**2 + z_prime**2
         D = np.sqrt(D_sq)
 
-        # Verificar alcanzabilidad
+        # Check reachability
         if D > self.l2 + self.l3 + 1e-6:
-            print(f"[PuzzleBotArm] IK: punto fuera del workspace (D={D:.4f} > {self.l2 + self.l3:.4f})")
+            print(f"[PuzzleBotArm] IK: point outside workspace (D={D:.4f} > {self.l2 + self.l3:.4f})")
             return None
         if D < abs(self.l2 - self.l3) - 1e-6:
-            print(f"[PuzzleBotArm] IK: punto demasiado cercano (D={D:.4f})")
+            print(f"[PuzzleBotArm] IK: point too close (D={D:.4f})")
             return None
 
-        # Ley de cosenos para q3
+        # Law of cosines for q3
         cos_q3 = (D_sq - self.l2**2 - self.l3**2) / (2 * self.l2 * self.l3)
         cos_q3 = np.clip(cos_q3, -1.0, 1.0)
-        q3 = -np.arccos(cos_q3)  # Codo hacia abajo (o arriba, según convención)
+        q3 = -np.arccos(cos_q3)  # Elbow down (or up, depending on convention)
 
-        # Geometría para q2
+        # Geometry for q2
         beta = np.arctan2(z_prime, r)
         gamma = np.arctan2(self.l3 * np.sin(abs(q3)), self.l2 + self.l3 * np.cos(q3))
         
@@ -114,7 +114,7 @@ class PuzzleBotArm:
         return q
 
     # ------------------------------------------------------------------
-    # Jacobiano Analítico
+    # Analytical Jacobian
     # ------------------------------------------------------------------
 
     def jacobian(self, q: Optional[np.ndarray] = None) -> np.ndarray:
@@ -123,12 +123,12 @@ class PuzzleBotArm:
 
         q1, q2, q3 = self.q
 
-        # Radio y sus derivadas
+        # Radius and its derivatives
         r = self.l2 * np.cos(q2) + self.l3 * np.cos(q2 + q3)
         dr_dq2 = -self.l2 * np.sin(q2) - self.l3 * np.sin(q2 + q3)
         dr_dq3 = -self.l3 * np.sin(q2 + q3)
 
-        # Derivadas de Z
+        # Z derivatives
         dz_dq2 = self.l2 * np.cos(q2) + self.l3 * np.cos(q2 + q3)
         dz_dq3 = self.l3 * np.cos(q2 + q3)
 
@@ -143,7 +143,7 @@ class PuzzleBotArm:
         return abs(np.linalg.det(self.jacobian(q)))
 
     # ------------------------------------------------------------------
-    # Control de Fuerza
+    # Force Control
     # ------------------------------------------------------------------
 
     def force_to_torque(self, f_tip: np.ndarray) -> np.ndarray:
@@ -153,7 +153,7 @@ class PuzzleBotArm:
         return tau
 
     # ------------------------------------------------------------------
-    # Trayectoria Cartesiana + Agarre
+    # Cartesian Trajectory + Grasp
     # ------------------------------------------------------------------
 
     def _cartesian_trajectory(self, p_start: np.ndarray, p_end: np.ndarray, steps: int = 20) -> List[np.ndarray]:
@@ -162,17 +162,17 @@ class PuzzleBotArm:
     def grasp_box(self, box_pos: np.ndarray, grip_force: float = 5.0, steps: int = 30) -> bool:
         p_current = self.forward_kinematics()
 
-        # Aproximación por encima de la caja
+        # Approach from above the box
         p_pregrasp = box_pos + np.array([0, 0, 0.04])
         traj = self._cartesian_trajectory(p_current, p_pregrasp, steps)
 
         for p in traj:
             q = self.inverse_kinematics(p)
             if q is None:
-                print(f"[PuzzleBotArm] grasp_box: IK falló en trayectoria pre-grasp.")
+                print(f"[PuzzleBotArm] grasp_box: IK failed in pre-grasp trajectory.")
                 return False
 
-        # Descender al punto de agarre
+        # Descend to grasp point
         p_grasp = box_pos.copy()
         traj_down = self._cartesian_trajectory(p_pregrasp, p_grasp, 10)
         for p in traj_down:
@@ -180,22 +180,22 @@ class PuzzleBotArm:
             if q is None:
                 return False
 
-        # Aplicar fuerza
+        # Apply force
         f_grip = np.array([0.0, 0.0, -grip_force])
         tau = self.force_to_torque(f_grip)
 
         det_J = self.jacobian_det()
         if det_J < 1e-3:
-            print(f"[PuzzleBotArm] ¡ADVERTENCIA! Singularidad en agarre: det(J)={det_J:.6f}")
+            print(f"[PuzzleBotArm] WARNING! Singularity in grasp: det(J)={det_J:.6f}")
 
         self.grasping = True
         self.grip_force = grip_force
-        print(f"[PuzzleBotArm] Agarre exitoso en {np.round(box_pos, 3)}. τ={np.round(tau, 4)} N·m | det(J)={det_J:.5f}")
+        print(f"[PuzzleBotArm] Successful grasp at {np.round(box_pos, 3)}. τ={np.round(tau, 4)} N·m | det(J)={det_J:.5f}")
         return True
 
     def place_box(self, target_pos: np.ndarray, steps: int = 30) -> bool:
         if not self.grasping:
-            print("[PuzzleBotArm] place_box: no hay caja agarrada.")
+            print("[PuzzleBotArm] place_box: no box grasped.")
             return False
 
         p_current = self.forward_kinematics()
@@ -228,13 +228,13 @@ class PuzzleBotArm:
             # Check for singularity
             det_J = self.jacobian_det()
             if det_J < 1e-3:
-                print(f"[PuzzleBotArm] ¡ADVERTENCIA! Singularidad en colocación: det(J)={det_J:.6f}")
+                print(f"[PuzzleBotArm] WARNING! Singularity in placement: det(J)={det_J:.6f}")
             
             # Log force control information
             if i == descent_steps - 1:  # Final contact
-                print(f"[PuzzleBotArm] Control de fuerza - Contacto suave:")
-                print(f"  Fuerza aplicada: {contact_force} N")
-                print(f"  Torques calculados (τ=J^T*f): {np.round(tau_contact, 4)} N·m")
+                print(f"[PuzzleBotArm] Force control - Soft contact:")
+                print(f"  Applied force: {contact_force} N")
+                print(f"  Calculated torques (τ=J^T*f): {np.round(tau_contact, 4)} N·m")
                 print(f"  det(J) = {det_J:.5f}")
                 
                 # Log to torque logger for rubric requirements
@@ -261,7 +261,7 @@ class PuzzleBotArm:
 
         self.grasping = False
         self.grip_force = 0.0
-        print(f"[PuzzleBotArm] Caja colocada en {np.round(target_pos, 3)} con control de fuerza.")
+        print(f"[PuzzleBotArm] Box placed at {np.round(target_pos, 3)} with force control.")
         return True
 
     def reset(self):
