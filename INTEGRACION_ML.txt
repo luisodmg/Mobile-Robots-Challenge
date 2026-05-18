@@ -1,0 +1,49 @@
+INTEGRACIÓN DE MACHINE LEARNING - RESUMEN
+==========================================
+
+✅ COMPLETADO
+
+Archivos creados:
+-----------------
+1. robot_ml.py - Modelos ML simples (4 robots)
+2. README_ML.md - Documentación completa
+
+Archivos modificados:
+--------------------
+1. sim.py - Agregadas llamadas ML en 4 puntos clave
+
+Modelos ML integrados:
+---------------------
+1. Husky - Logistic Regression (clasificar seguridad)
+2. ANYmal - Linear Regression (predecir ETA)  
+3. PuzzleBot - K-Means (identificar zonas)
+4. Coordinator - Ridge Regression (tiempo total)
+
+Dónde se ejecutan en sim.py:
+---------------------------
+- Línea ~308: Husky ML activado
+- Línea ~365: ANYmal ETA predicción
+- Línea ~419: PuzzleBot zonas identificadas
+- Línea ~519: Coordinator predicción final
+
+Cómo usar:
+----------
+python3 sim.py
+
+Verás salidas ML como:
+[ML] Husky - Logistic Regression activado
+[ML] ANYmal ETA: 38.5s (Linear Regression)
+[ML] PuzzleBot 0 en zona: wait (K-Means)
+[ML] Coordinator - Ridge Regression:
+  Tiempo predicho: 92.1s
+
+Archivos archivados:
+-------------------
+ml_archive/ contiene implementaciones completas si las necesitas
+
+Problemas conocidos:
+-------------------
+- Los PuzzleBots no se visualizan bien en fase 3 (problema de sim.py original, no de ML)
+- ANYmal va directo al destino (puede modificarse agregando waypoints)
+
+La integración ML es SIMPLE y FUNCIONAL ✓

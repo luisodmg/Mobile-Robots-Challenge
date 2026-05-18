@@ -7,7 +7,13 @@ Sensor: LiDAR 2D simulado.
 
 import numpy as np
 import time
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
+
+# Módulos de visión por computadora
+from vision_camera import VisionCamera, create_box_object, create_landmark_object
+from vision_perception import VisionPerception
+from pathfinding import AStarPlanner
+from metrics_tracker import metrics_tracker
 
 
 # ---------------------------------------------------------------------------
@@ -163,11 +169,23 @@ class HuskyPusher:
     CORRIDOR_Y_MIN = -1.0
     CORRIDOR_Y_MAX = 1.0
 
-    def __init__(self, slip_factor: float = 0.05, dt: float = 0.05):
+    def __init__(self, slip_factor: float = 0.05, dt: float = 0.05, use_vision: bool = True):
         self.state = HuskyState(x=0.0, y=0.0, theta=0.0)
         self.controller = SkidSteerController(slip_factor)
         self.lidar = LiDAR2D()
         self.dt = dt
+        
+        # Sistema de visión por computadora
+        self.use_vision = use_vision
+        if use_vision:
+            self.camera = VisionCamera("husky", camera_offset=np.array([0.2, 0.0, 0.3]))
+            self.perception = VisionPerception("husky")
+            self.planner = AStarPlanner((-1.0, 13.0, -3.0, 6.0), resolution=0.15)
+            print("[Husky] Sistema de visión por computadora activado")
+        else:
+            self.camera = None
+            self.perception = None
+            self.planner = None
 
         self.boxes = [
             Box("B1", x=2.5, y=0.0),
@@ -182,8 +200,10 @@ class HuskyPusher:
         self.target_box = None
         self.target_pos = None
         self.pushing = False
+        self.returning = False
 
     def detect_boxes(self) -> List[Dict]:
+        """Detección de cajas usando LiDAR (legacy)."""
         ranges = self.lidar.scan(self.state, self.boxes)
         detected = []
         for i, r in enumerate(ranges):
@@ -193,6 +213,53 @@ class HuskyPusher:
                 by = self.state.y + r * np.sin(angle)
                 detected.append({"range": r, "angle": self.lidar.angles[i],
                                   "world_x": bx, "world_y": by})
+        return detected
+    
+    def detect_boxes_visual(self) -> List[Dict]:
+        """Detección de cajas usando visión por computadora (Técnica 1: Color + Técnica 2: Contornos)."""
+        if not self.use_vision or self.camera is None:
+            return self.detect_boxes()  # Fallback a LiDAR
+        
+        # Actualizar pose de cámara
+        self.camera.update_pose(
+            np.array([self.state.x, self.state.y, 0.0]),
+            self.state.theta
+        )
+        
+        # Crear objetos visibles para la cámara
+        visible_objects = []
+        for box in self.boxes:
+            if not box.cleared:
+                obj = create_box_object(box.id, np.array([box.x, box.y]), "large")
+                visible_objects.append(obj)
+        
+        # Capturar imagen y detectar
+        detections = self.camera.capture(visible_objects)
+        
+        # Procesar detecciones con percepción visual
+        self.perception.process_detections(detections, self.state.theta)
+        
+        # Convertir a formato compatible
+        detected = []
+        for obs in self.perception.obstacles:
+            detected.append({
+                "range": obs.distance,
+                "angle": obs.angle,
+                "world_x": obs.position[0],
+                "world_y": obs.position[1],
+                "detection_method": obs.detection_method  # "color" o "contour"
+            })
+        
+        # Verificar si hay obstáculos cerca para evitar colisiones
+        if self.perception.obstacles:
+            min_distance = self.perception.get_min_range()
+            if min_distance < 0.5:  # Umbral de colisión
+                metrics_tracker.log_collision_avoided(
+                    robot_id=0,  # Husky ID
+                    obstacle_distance=min_distance,
+                    action="slow_down"
+                )
+        
         return detected
 
     def goto(

@@ -2,6 +2,19 @@
 
 Simulacion 2D de un sistema multi-robot para un almacen autonomo, desarrollada en Python con enfoque en coordinacion por fases, cinematica, control de fuerza y visualizacion de metricas.
 
+## 🎯 IRS Inc. AI Hackathon 2026
+
+**Este proyecto ahora incluye navegación multi-robot con visión por computadora** para cumplir con los requisitos del hackathon. Ver **[README_HACKATHON.md](README_HACKATHON.md)** para detalles completos.
+
+**Características del Hackathon:**
+- ✅ Percepción visual RGB (sin LiDAR/GPS)
+- ✅ Detección por color + contornos + ArUco
+- ✅ Planificación A* con replaneación
+- ✅ Asignación greedy de tareas
+- ✅ Métricas: Makespan, colisiones evitadas, replaneaciones
+
+---
+
 El proyecto integra tres subsistemas principales:
 
 - Husky A200 para despejar un corredor empujando cajas grandes.

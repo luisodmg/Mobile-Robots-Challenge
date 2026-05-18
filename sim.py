@@ -25,6 +25,14 @@ from coordinator import Coordinator, Phase, SmallBox
 from torque_logger import torque_logger
 from robot_ml import ml_system
 
+# Módulos de visión por computadora y métricas del hackathon
+from vision_camera import VisionCamera, create_box_object, create_landmark_object
+from vision_perception import VisionPerception
+from pathfinding import AStarPlanner, create_warehouse_planner
+from task_allocator import TaskAllocator, create_default_tasks
+from metrics_tracker import metrics_tracker
+import vision_config as vc
+
 
 # ---------------------------------------------------------------------------
 # Paleta de colores
@@ -57,26 +65,44 @@ class Sim2D:
     X_TOTAL = 13.0
     Y_MIN, Y_MAX = -3.0, 6.0
 
-    def __init__(self, dt: float = 0.05, save_gif: bool = False):
+    def __init__(self, dt: float = 0.05, save_gif: bool = False, use_vision: bool = True):
         self.dt = dt
         self.save_gif = save_gif
         self.frames: List = []
+        self.use_vision = use_vision
 
         # Sistemas
-        self.husky = HuskyPusher(slip_factor=0.05, dt=dt)
+        self.husky = HuskyPusher(slip_factor=0.05, dt=dt, use_vision=use_vision)
         self.anymal = ANYmalGait(dt=dt)
 
         # Instanciar coordinador para la lógica de la fase 3
         self.coord = Coordinator(dt=dt)
+
+        # Sistema de visión y planificación (HACKATHON)
+        if use_vision:
+            self.planner = create_warehouse_planner(resolution=0.15)
+            self.task_allocator = TaskAllocator(n_robots=3, strategy="greedy")
+            print("[Sim2D] Sistema de visión por computadora ACTIVADO")
+            print("[Sim2D] Técnicas habilitadas: Detección por color, Contornos, ArUco")
+        else:
+            self.planner = None
+            self.task_allocator = None
 
         # Estado visual
         self.current_phase = "INICIO"
         self.phase_log: List[str] = []
         self.stack_boxes: List[dict] = []  # Cajas en la pila
 
-        # Figura
-        self.fig, self.axes = plt.subplots(1, 2, figsize=(16, 8),
-                                            gridspec_kw={"width_ratios": [3, 1]})
+        # Figura - Agregar panel para vista de cámara si se usa visión
+        if use_vision:
+            self.fig, self.axes = plt.subplots(1, 3, figsize=(20, 8),
+                                                gridspec_kw={"width_ratios": [3, 1, 1]})
+            self.ax_camera = self.axes[2]  # Panel de cámara
+        else:
+            self.fig, self.axes = plt.subplots(1, 2, figsize=(16, 8),
+                                                gridspec_kw={"width_ratios": [3, 1]})
+            self.ax_camera = None
+        
         self.fig.patch.set_facecolor(COLORS["bg"])
         self.ax = self.axes[0]
         self.ax_info = self.axes[1]
@@ -243,6 +269,50 @@ class Sim2D:
             y_pos -= 0.055
             if y_pos < 0.05:
                 break
+    
+    def _draw_camera_view(self):
+        """Dibuja la vista de cámara del Husky (HACKATHON - Requisito de visualización)."""
+        if not self.use_vision or self.ax_camera is None or self.husky.camera is None:
+            return
+        
+        ax = self.ax_camera
+        ax.clear()
+        ax.set_facecolor(COLORS["bg"])
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis("off")
+        
+        # Título
+        ax.text(0.5, 0.95, "VISTA DE CÁMARA", color=COLORS["text"],
+                fontsize=10, ha="center", fontweight="bold")
+        ax.text(0.5, 0.90, "Husky A200", color=COLORS["husky"],
+                fontsize=8, ha="center")
+        
+        # Renderizar vista de cámara
+        camera_img = self.husky.camera.render_debug_view()
+        
+        # Mostrar imagen en el panel
+        ax.imshow(camera_img, extent=[0.05, 0.95, 0.05, 0.80], aspect='auto')
+        
+        # Mostrar estadísticas de detección
+        y_pos = 0.02
+        if self.husky.perception:
+            stats = self.husky.perception.get_statistics()
+            ax.text(0.05, y_pos, f"Obstáculos: {stats['total_obstacles']}", 
+                   color=COLORS["text"], fontsize=7)
+            
+            # Mostrar técnicas usadas
+            techniques = []
+            if stats['techniques_enabled']['color']:
+                techniques.append("Color")
+            if stats['techniques_enabled']['contour']:
+                techniques.append("Contorno")
+            if stats['techniques_enabled']['aruco']:
+                techniques.append("ArUco")
+            
+            if techniques:
+                ax.text(0.5, y_pos, f"Técnicas: {', '.join(techniques)}", 
+                       color=COLORS["success"], fontsize=6, ha="center")
 
     def _refresh_live_view(
         self,
@@ -291,6 +361,11 @@ class Sim2D:
                          ha="center", va="center", fontweight="bold")
 
         self._draw_info_panel(phase_name, metrics)
+        
+        # Dibujar vista de cámara (HACKATHON)
+        if self.use_vision:
+            self._draw_camera_view()
+        
         self.fig.canvas.draw_idle()
         self.fig.canvas.flush_events()
         plt.pause(0.001)
@@ -302,6 +377,11 @@ class Sim2D:
     def run_and_save(self, output_path: str = "sim_output.png", live_display: bool = True):
         """Ejecuta la simulación completa, muestra la vista en vivo y guarda frames clave."""
         print("\n[Sim2D] Iniciando simulación completa...")
+        
+        # Iniciar tracking de métricas del hackathon
+        if self.use_vision:
+            metrics_tracker.start_mission()
+            print("[HACKATHON] Métricas iniciadas - Makespan tracking activado")
 
         if live_display:
             plt.ion()
@@ -314,6 +394,9 @@ class Sim2D:
         self.current_phase = "FASE 1: Husky despeja corredor"
         print("[ML] Husky - Logistic Regression activado")
         
+        if self.use_vision:
+            print("[VISION] Detección por COLOR + CONTORNOS activada")
+        
         # Reset Husky state machine for non-blocking operation
         self.husky.nav_state = "IDLE"
         self.husky.target_box = None
@@ -323,6 +406,10 @@ class Sim2D:
         
         phase1_complete = False
         for step in range(1200):  # More steps for smoother animation
+            # Usar detección visual si está habilitada (HACKATHON)
+            if self.use_vision and step % 5 == 0:  # Actualizar cada 5 pasos
+                self.husky.detect_boxes_visual()
+            
             # Use non-blocking corridor clearing
             if not phase1_complete:
                 phase1_complete = self.husky.clear_corridor_step()
@@ -570,6 +657,14 @@ class Sim2D:
                 print("[Sim2D] ✓ Fase 3 completada con control de fuerza real")
                 break
 
+        # ── Finalizar métricas del hackathon ───────────────────────────
+        if self.use_vision:
+            metrics_tracker.end_mission()
+            print("\n" + "="*70)
+            print("  REPORTE DE MÉTRICAS DEL HACKATHON")
+            print("="*70)
+            metrics_tracker.print_report()
+        
         # ── Renderizar frames clave ───────────────────────────────────
         total_time = self.husky.time + 30.0 + 40.0
         predicted = ml_system.coordinator_predict_mission(self.husky.time, 30.0, 40.0)
@@ -795,13 +890,25 @@ if __name__ == "__main__":
     torque_logger.generate_torque_report(torque_report_path)
     torque_logger.plot_torque_analysis(torque_analysis_path)
 
-    print("\n✓ Simulación completada con todas las mejoras implementadas:")
+    print("\n" + "="*70)
+    print("  ✓ SIMULACIÓN COMPLETADA - IRS Inc. AI Hackathon 2026")
+    print("="*70)
+    print("\n✓ Características implementadas:")
     print("  ✓ Animación fluida (máquina de estados no bloqueante)")
     print("  ✓ Control de fuerza real (τ = J^T * f)")
     print("  ✓ Sincronización por eventos (C→B→A)")
     print("  ✓ Log de torques para rúbrica")
+    print("\n✓ HACKATHON - Visión por Computadora:")
+    print("  ✓ Detección por COLOR (Técnica 1)")
+    print("  ✓ Detección de CONTORNOS (Técnica 2)")
+    print("  ✓ Landmarks ArUco (Técnica 3 - opcional)")
+    print("  ✓ Estimación de distancia desde tamaño")
+    print("  ✓ Planificación A* con replaneación")
+    print("  ✓ Asignación greedy de tareas")
+    print("  ✓ Métricas: Makespan, colisiones evitadas, replaneaciones")
     print("\nArchivos generados:")
     print(f"  - {sim_output_path} (visualización completa)")
     print(f"  - {metrics_path} (métricas del sistema)")
     print(f"  - {torque_report_path} (log de torques)")
     print(f"  - {torque_analysis_path} (análisis de control de fuerza)")
+    print("\n" + "="*70)
